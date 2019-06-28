@@ -373,6 +373,7 @@
         <module>argon2</module>
         <module>config</module>
         <module>config-cli</module>
+        <module>tests</module>
         <module>security</module>
         <module>service-locator</module>
         <module>server</module>
