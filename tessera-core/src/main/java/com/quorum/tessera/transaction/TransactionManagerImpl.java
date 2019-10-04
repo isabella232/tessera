@@ -202,7 +202,7 @@ public class TransactionManagerImpl implements TransactionManager {
         if (request.getType() == ResendRequestType.ALL) {
 
             int offset = 0;
-            final int maxResult = 10000;
+            final int maxResult = 1000;
 
             while (offset < encryptedTransactionDAO.transactionCount()) {
 
