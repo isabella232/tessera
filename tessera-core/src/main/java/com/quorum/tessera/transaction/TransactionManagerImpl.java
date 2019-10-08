@@ -202,9 +202,10 @@ public class TransactionManagerImpl implements TransactionManager {
         if (request.getType() == ResendRequestType.ALL) {
 
             int offset = 0;
-            final int maxResult = 1000;
+            final int maxResult = 250;
 
-            while (offset < encryptedTransactionDAO.transactionCount()) {
+            final long transactionCount = encryptedTransactionDAO.transactionCount();
+            while (offset < transactionCount) {
 
                 encryptedTransactionDAO.retrieveTransactions(offset, maxResult).stream()
                         .map(EncryptedTransaction::getEncodedPayload)
