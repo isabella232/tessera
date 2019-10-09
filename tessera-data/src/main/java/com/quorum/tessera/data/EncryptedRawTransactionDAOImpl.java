@@ -9,7 +9,7 @@ import javax.persistence.EntityNotFoundException;
 import javax.persistence.PersistenceContext;
 import java.util.Optional;
 
-/** A JPA implementation of {@link EncryptedRawTransactionDAO} */
+/** A JPA implementation of {@link EncryptedTransactionDAO} */
 public class EncryptedRawTransactionDAOImpl implements EncryptedRawTransactionDAO {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(EncryptedRawTransactionDAOImpl.class);

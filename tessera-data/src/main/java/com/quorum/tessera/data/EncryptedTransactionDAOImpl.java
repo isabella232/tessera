@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Optional;
 import javax.persistence.criteria.CriteriaBuilder;
 import javax.persistence.criteria.CriteriaQuery;
-import javax.persistence.criteria.Root;
 import javax.transaction.Transactional;
 
 /** A JPA implementation of {@link EncryptedTransactionDAO} */
@@ -21,6 +20,8 @@ public class EncryptedTransactionDAOImpl implements EncryptedTransactionDAO {
 
     private static final String FIND_HASH_EQUAL =
             "SELECT et FROM EncryptedTransaction et WHERE et.hash.hashBytes = :hash";
+
+    private static final String FIND_ALL = "SELECT et FROM EncryptedTransaction et ORDER BY et.timestamp,et.hash";
 
     @PersistenceContext(unitName = "tessera")
     private EntityManager entityManager;
@@ -47,15 +48,8 @@ public class EncryptedTransactionDAOImpl implements EncryptedTransactionDAO {
     public List<EncryptedTransaction> retrieveTransactions(int offset, int maxResult) {
         LOGGER.info("Fetching batch(offset:{},maxResult:{}) EncryptedTransaction database rows", offset, maxResult);
 
-        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
-        
-        CriteriaQuery<EncryptedTransaction> query = criteriaBuilder.createQuery(EncryptedTransaction.class);
-        Root<EncryptedTransaction> eTxn = query.from(EncryptedTransaction.class);
-        query.select(eTxn);
-        query.orderBy(criteriaBuilder.asc(eTxn.get("hash")), criteriaBuilder.asc(eTxn.get("timestamp")));
-
         return entityManager
-                .createQuery(query)
+                .createQuery(FIND_ALL, EncryptedTransaction.class)
                 .setFirstResult(offset)
                 .setMaxResults(maxResult)
                 .getResultList();
@@ -69,9 +63,7 @@ public class EncryptedTransactionDAOImpl implements EncryptedTransactionDAO {
         CriteriaQuery<Long> countQuery = criteriaBuilder.createQuery(Long.class);
         countQuery.select(criteriaBuilder.count(countQuery.from(EncryptedTransaction.class)));
 
-        return entityManager
-                        .createQuery(countQuery)
-                        .getSingleResult();
+        return entityManager.createQuery(countQuery).getSingleResult();
     }
 
     @Override
