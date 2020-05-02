@@ -9,10 +9,8 @@
     <parent>
         <groupId>com.jpmorgan.quorum</groupId>
         <artifactId>tests</artifactId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
-
-
 
     <dependencies>
 
@@ -20,40 +18,34 @@
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>tessera-app</artifactId>
             <classifier>${tesssra.app.classifer}</classifier>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
-        
+
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>tessera-simple</artifactId>
             <classifier>${tesssra.app.classifer}</classifier>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
-   
-        <dependency>
-            <groupId>com.jpmorgan.quorum</groupId>
-            <artifactId>tessera-grpc</artifactId>
-            <classifier>${tesssra.app.classifer}</classifier>
-             <scope>test</scope>
-        </dependency>
-   
+
+
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>enclave-jaxrs</artifactId>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
-   
+
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>enclave-jaxrs</artifactId>
             <classifier>${enclave.server.classifer}</classifier>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
-        
+
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>test-util</artifactId>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -61,28 +53,27 @@
             <artifactId>config-migration</artifactId>
             <scope>test</scope>
             <classifier>cli</classifier>
-            <version>0.10-SNAPSHOT</version>
+            <version>0.10.6-SNAPSHOT</version>
         </dependency>
 
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>ddls</artifactId>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-junit</artifactId>
             <version>4.0.1</version>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-java8</artifactId>
             <version>4.0.1</version>
-             <scope>test</scope>
+            <scope>test</scope>
         </dependency>
-
 
         <dependency>
             <groupId>org.xerial</groupId>
@@ -95,12 +86,19 @@
             <artifactId>hsqldb</artifactId>
             <scope>test</scope>
         </dependency>
+
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>tessera-partyinfo</artifactId>
-            <version>0.10-SNAPSHOT</version>
             <scope>test</scope>
             <type>jar</type>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.tomakehurst</groupId>
+            <artifactId>wiremock-jre8</artifactId>
+            <version>2.25.1</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -141,6 +139,7 @@
             <plugin>
                 <groupId>org.codehaus.gmaven</groupId>
                 <artifactId>groovy-maven-plugin</artifactId>
+                <version>2.1</version>
                 <dependencies>
                     <dependency>
                         <groupId>org.codehaus.groovy</groupId>
@@ -154,11 +153,11 @@
                         def classifier = project.properties['tesssra.app.classifer']
 
                         def arts = project.artifacts
-                                .findAll{item -> item.getGroupId().equals('com.jpmorgan.quorum')}
+                        .findAll{item -&gt; item.getGroupId().equals('com.jpmorgan.quorum')}
 
 
                         def dep = arts
-                            .find{item -> item.getArtifactId().equals('tessera-app') and item.getClassifier().equals(classifier)}
+                        .find{item -&gt; item.getArtifactId().equals('tessera-app') and item.getClassifier().equals(classifier)}
 
 
                         project.properties.setProperty('application.jar', dep.getFile().getPath())
@@ -166,7 +165,7 @@
                         def eclassifier = project.properties['enclave.server.classifer']
 
                         def enclaveArt = arts
-                            .find{item -> item.getArtifactId().equals('enclave-jaxrs') and item.getClassifier().equals(eclassifier)}
+                        .find{item -&gt; item.getArtifactId().equals('enclave-jaxrs') and item.getClassifier().equals(eclassifier)}
 
                         project.properties.setProperty('enclave.jaxrs.server.jar',enclaveArt.getFile().getPath())
                     </source>
@@ -189,7 +188,7 @@
                 <configuration>
                     <skip>false</skip>
                     <rerunFailingTestsCount>0</rerunFailingTestsCount>
-                    
+
                     <systemPropertyVariables>
                         <application.jar>${application.jar}</application.jar>
                         <jdbc.hsql.jar>${org.hsqldb:hsqldb:jar}</jdbc.hsql.jar>
@@ -199,26 +198,20 @@
                         <config-migration-app.jar>${com.jpmorgan.quorum:config-migration:jar:cli}</config-migration-app.jar>
                     </systemPropertyVariables>
                     <includes>
-                        <include>AdminRestSuite</include>
-                        <include>RestSuiteRemoteEnclaveH2</include>
-                        <include>RestSuiteH2</include>
+                        <include>CucumberFileKeyGenerationIT</include>
+                        <include>RestSuiteHttpH2</include>
+                        <include>RestSuiteHttpHSQL</include>
+                        <include>RestSuiteHttpSqllite</include>
                         <include>RestSuiteUnixH2</include>
                         <include>CucumberWhitelistIT</include>
-                        <include>RestSuiteH2</include>
-                        <include>RestSuiteUnixH2</include>
-                        <include>RestSuiteHSQL</include>
-                        <include>RestSuiteUnixH2</include>
-                        <include>RestSuiteSqlite</include>
                         <include>ConfigMigrationIT</include>
-                        <include>GrpcSuiteH2</include>
-                        <include>GrpcSuiteSqlite</include>
-                        <include>GrpcSuiteHSQL</include>
                         <include>P2pTestSuite</include>
+                        <include>SendWithRemoteEnclaveReconnectIT</include>
                     </includes>
                 </configuration>
                 <executions>
                     <execution>
-                        <id>integration-test</id> 
+                        <id>integration-test</id>
                         <phase>integration-test</phase>
                         <goals>
                             <goal>integration-test</goal>
@@ -233,8 +226,8 @@
                     </execution>
                 </executions>
             </plugin>
-            
-            
+
+
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
@@ -247,15 +240,13 @@
 
     <profiles>
 
-
-
         <profile>
             <id>acceptance-test</id>
             <activation>
                 <activeByDefault>true</activeByDefault>
             </activation>
-
         </profile>
+
         <profile>
             <id>disable-acceptance-test</id>
             <activation>
@@ -276,6 +267,8 @@
                         <configuration>
                             <includes>
                                 <include>RunHashicorpIT</include>
+                                <include>RunAzureIT</include>
+                                <include>RunAwsIT</include>
                             </includes>
                         </configuration>
                     </plugin>
@@ -283,26 +276,16 @@
             </build>
         </profile>
 
-
-
         <profile>
-            <id>grpc-acceptance-tests</id>
+            <id>hashicorp-vault-acceptance-tests</id>
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-failsafe-plugin</artifactId>
                         <configuration>
-                            <systemPropertyVariables>
-                                <application.jar>${com.jpmorgan.quorum:tessera-grpc:jar:app}</application.jar>
-                                <jdbc.hsql.jar>${org.hsqldb:hsqldb:jar}</jdbc.hsql.jar>
-                                <jdbc.sqlite.jar>${org.xerial:sqlite-jdbc:jar}</jdbc.sqlite.jar>
-                            </systemPropertyVariables>
-                            <rerunFailingTestsCount>0</rerunFailingTestsCount>
                             <includes>
-                                <include>GrpcSuiteH2</include>
-                                <include>GrpcSuiteSqlite</include>
-                                <include>GrpcSuiteHSQL</include>
+                                <include>RunHashicorpIT</include>
                             </includes>
                         </configuration>
                     </plugin>
@@ -311,10 +294,44 @@
         </profile>
 
         <profile>
+            <id>azure-vault-acceptance-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>RunAzureIT</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>aws-vault-acceptance-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>RunAwsIT</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+
+        <profile>
             <id>simple-acceptance-tests</id>
 
             <build>
-               
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
@@ -327,15 +344,30 @@
                             </systemPropertyVariables>
                             <rerunFailingTestsCount>0</rerunFailingTestsCount>
                             <includes>
+                                <include>CucumberFileKeyGenerationIT</include>
                                 <include>AdminRestSuite</include>
-                                <include>RestSuiteH2</include>
+                                <include>RestSuiteSimple</include>
+                                <include>RestSuiteUnixH2</include>
                                 <include>CucumberWhitelistIT</include>
-                                <include>RestSuiteH2</include>
-                                <include>RestSuiteUnixH2</include>
-                                <include>RestSuiteHSQL</include>
-                                <include>RestSuiteUnixH2</include>
-                                <include>RestSuiteSqlite</include>
                                 <include>ConfigMigrationIT</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>stress-tests</id>
+
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>StressRestSuite</include>
                             </includes>
                         </configuration>
                     </plugin>

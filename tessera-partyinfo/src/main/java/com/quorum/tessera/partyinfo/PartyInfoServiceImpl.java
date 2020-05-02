@@ -1,14 +1,13 @@
 package com.quorum.tessera.partyinfo;
 
-import com.quorum.tessera.admin.ConfigService;
+import com.quorum.tessera.context.RuntimeContext;
+import com.quorum.tessera.enclave.Enclave;
+import com.quorum.tessera.enclave.EncodedPayload;
+import com.quorum.tessera.encryption.KeyNotFoundException;
+import com.quorum.tessera.encryption.PublicKey;
 import com.quorum.tessera.partyinfo.model.Party;
 import com.quorum.tessera.partyinfo.model.PartyInfo;
 import com.quorum.tessera.partyinfo.model.Recipient;
-import com.quorum.tessera.config.Peer;
-import com.quorum.tessera.enclave.Enclave;
-import com.quorum.tessera.encryption.KeyNotFoundException;
-import com.quorum.tessera.encryption.PublicKey;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,41 +15,58 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.quorum.tessera.partyinfo.PartyInfoServiceUtil.validateKeysToUrls;
 import static java.util.stream.Collectors.toSet;
 
 public class PartyInfoServiceImpl implements PartyInfoService {
 
-    private final PartyInfoStore partyInfoStore;
-
-    private final ConfigService configService;
-
     private static final Logger LOGGER = LoggerFactory.getLogger(PartyInfoServiceImpl.class);
 
-    public PartyInfoServiceImpl(final PartyInfoStore partyInfoStore,
-                                final ConfigService configService,
-                                final Enclave enclave) {
+    private final PartyInfoStore partyInfoStore;
+
+    private final Enclave enclave;
+
+    private final PayloadPublisher payloadPublisher;
+
+    public PartyInfoServiceImpl(final PartyInfoServiceFactory partyInfoServiceFactory) {
+        this(
+                partyInfoServiceFactory.partyInfoStore(),
+                partyInfoServiceFactory.enclave(),
+                partyInfoServiceFactory.payloadPublisher());
+    }
+
+    protected PartyInfoServiceImpl(
+            final PartyInfoStore partyInfoStore, final Enclave enclave, final PayloadPublisher payloadPublisher) {
         this.partyInfoStore = Objects.requireNonNull(partyInfoStore);
-        this.configService = Objects.requireNonNull(configService);
+        this.enclave = Objects.requireNonNull(enclave);
+        this.payloadPublisher = Objects.requireNonNull(payloadPublisher);
+    }
 
-        final String advertisedUrl = URLNormalizer.create().normalize(configService.getServerUri().toString());
+    @Override
+    public void populateStore() {
+        LOGGER.debug("Populating store");
+        RuntimeContext runtimeContext = RuntimeContext.getInstance();
+        final String advertisedUrl = URLNormalizer.create().normalize(partyInfoStore.getPartyInfo().getUrl());
+        LOGGER.debug("Populate party info store for {}", advertisedUrl);
 
+        final Set<Party> initialParties =
+                runtimeContext.getPeers().stream()
+                        .map(Objects::toString)
+                        .peek(o -> LOGGER.debug("Party {}", o))
+                        .map(Party::new)
+                        .collect(toSet());
 
-        final Set<Party> initialParties = configService
-            .getPeers()
-            .stream()
-            .map(Peer::getUrl)
-            .map(Party::new)
-            .collect(toSet());
+        LOGGER.debug("{} peers found. ", initialParties.size());
 
-        final Set<Recipient> ourKeys = enclave
-            .getPublicKeys()
-            .stream()
-            .map(key -> PublicKey.from(key.getKeyBytes()))
-            .map(key -> new Recipient(key, advertisedUrl))
-            .collect(toSet());
+        final Set<Recipient> ourKeys =
+                enclave.getPublicKeys().stream()
+                        .peek(o -> LOGGER.debug("{}", o))
+                        .map(key -> new Recipient(key, advertisedUrl))
+                        .collect(toSet());
 
-        partyInfoStore.store(new PartyInfo(advertisedUrl, ourKeys, initialParties));
-
+        PartyInfo partyInfo = new PartyInfo(advertisedUrl, ourKeys, initialParties);
+        partyInfoStore.store(partyInfo);
+        LOGGER.debug("Populated party info store {}", partyInfo);
     }
 
     @Override
@@ -61,40 +77,50 @@ public class PartyInfoServiceImpl implements PartyInfoService {
     @Override
     public PartyInfo updatePartyInfo(final PartyInfo partyInfo) {
 
-        if (!configService.isDisablePeerDiscovery()) {
-            //auto-discovery is on, we can accept all input to us
-            this.partyInfoStore.store(partyInfo);
-            return partyInfoStore.getPartyInfo();
+        final RuntimeContext runtimeContext = RuntimeContext.getInstance();
+
+        if (!runtimeContext.isRemoteKeyValidation()) {
+            final PartyInfo existingPartyInfo = this.getPartyInfo();
+
+            if (!validateKeysToUrls(existingPartyInfo, partyInfo)) {
+                LOGGER.warn(
+                        "Attempt is being made to update existing key with new url. "
+                                + "Please switch on remote key validation to avoid a security breach.");
+            }
         }
 
-        //auto-discovery is off
+        if (!runtimeContext.isDisablePeerDiscovery()) {
+            // auto-discovery is on, we can accept all input to us
+            this.partyInfoStore.store(partyInfo);
+            return this.getPartyInfo();
+        }
 
-        final Set<String> peerUrls = configService
-            .getPeers()
-            .stream()
-            .map(Peer::getUrl)
-            .collect(Collectors.toSet());
+        // auto-discovery is off
+        final Set<String> peerUrls =
+                runtimeContext.getPeers().stream()
+                    .map(Objects::toString)
+                    .collect(Collectors.toSet());
 
         LOGGER.debug("Known peers: {}", peerUrls);
 
-        //check the caller is allowed to update our party info, which it can do
-        //if it one of our known peers
+        // check the caller is allowed to update our party info, which it can do
+        // if it one of our known peers
         final String incomingUrl = partyInfo.getUrl();
 
-        //TODO: should we just check peer is the same or with +"/", instead of just starts with?
+        // TODO: should we just check peer is the same or with +"/", instead of just starts with?
         if (peerUrls.stream().noneMatch(incomingUrl::startsWith)) {
             final String message = String.format("Peer %s not found in known peer list", partyInfo.getUrl());
             throw new AutoDiscoveryDisabledException(message);
         }
 
-        //filter out all keys that aren't from that node
-        final Set<Recipient> knownRecipients = partyInfo
-            .getRecipients()
-            .stream()
-            .filter(recipient -> Objects.equals(recipient.getUrl(), incomingUrl))
-            .collect(Collectors.toSet());
+        // filter out all keys that aren't from that node
+        final Set<Recipient> knownRecipients =
+                partyInfo.getRecipients().stream()
+                        .filter(recipient -> Objects.equals(recipient.getUrl(), incomingUrl))
+                        .collect(Collectors.toSet());
 
-        //TODO: instead of adding the peers every time, if a new peer is added at runtime then this should be added separately
+        // TODO: instead of adding the peers every time, if a new peer is added at runtime then this should be added
+        // separately
         final Set<Party> parties = peerUrls.stream().map(Party::new).collect(toSet());
 
         partyInfoStore.store(new PartyInfo(partyInfo.getUrl(), knownRecipients, parties));
@@ -103,17 +129,35 @@ public class PartyInfoServiceImpl implements PartyInfoService {
     }
 
     @Override
-    public String getURLFromRecipientKey(final PublicKey key) {
-
-        final Recipient retrievedRecipientFromStore = partyInfoStore
-            .getPartyInfo()
-            .getRecipients()
-            .stream()
-            .filter(recipient -> key.equals(recipient.getKey()))
-            .findAny()
-            .orElseThrow(() -> new KeyNotFoundException("Recipient not found for key: " + key.encodeToBase64()));
-
-        return retrievedRecipientFromStore.getUrl();
+    public PartyInfo removeRecipient(String uri) {
+        return partyInfoStore.removeRecipient(uri);
     }
 
+    @Override
+    public void publishPayload(final EncodedPayload payload, final PublicKey recipientKey) {
+
+        if (enclave.getPublicKeys().contains(recipientKey)) {
+            // we are trying to send something to ourselves - don't do it
+            LOGGER.debug(
+                    "Trying to send message to ourselves with key {}, not publishing", recipientKey.encodeToBase64());
+            return;
+        }
+
+        final Recipient retrievedRecipientFromStore =
+                partyInfoStore.getPartyInfo().getRecipients().stream()
+                        .filter(recipient -> recipientKey.equals(recipient.getKey()))
+                        .findAny()
+                        .orElseThrow(
+                                () ->
+                                        new KeyNotFoundException(
+                                                "Recipient not found for key: " + recipientKey.encodeToBase64()));
+
+        final String targetUrl = retrievedRecipientFromStore.getUrl();
+
+        LOGGER.info("Publishing message to {}", targetUrl);
+
+        payloadPublisher.publishPayload(payload, targetUrl);
+
+        LOGGER.info("Published to {}", targetUrl);
+    }
 }

@@ -3,7 +3,7 @@
     <parent>
         <artifactId>tessera</artifactId>
         <groupId>com.jpmorgan.quorum</groupId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -23,6 +23,14 @@
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>key-vault-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.jpmorgan.quorum</groupId>
+            <artifactId>cli-api</artifactId>
         </dependency>
 
     </dependencies>

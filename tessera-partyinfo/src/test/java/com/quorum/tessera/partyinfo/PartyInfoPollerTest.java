@@ -1,16 +1,16 @@
 package com.quorum.tessera.partyinfo;
 
-import com.quorum.tessera.partyinfo.PartyInfoService;
-import com.quorum.tessera.partyinfo.P2pClient;
-import com.quorum.tessera.partyinfo.PartyInfoPoller;
-import com.quorum.tessera.partyinfo.PartyInfoParser;
 import com.quorum.tessera.partyinfo.model.Party;
 import com.quorum.tessera.partyinfo.model.PartyInfo;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.invocation.InvocationOnMock;
 
-import java.net.ConnectException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.Executor;
 
 import static java.util.Collections.emptySet;
 import static java.util.Collections.singleton;
@@ -24,6 +24,8 @@ public class PartyInfoPollerTest {
 
     private static final String TARGET_URL = "http://bogus.com:9878/";
 
+    private static final String TARGET_URL_2 = "http://otherwebsite.com:9878/";
+
     private static final byte[] DATA = "BOGUS".getBytes();
 
     private PartyInfoService partyInfoService;
@@ -34,12 +36,25 @@ public class PartyInfoPollerTest {
 
     private P2pClient p2pClient;
 
+    private Executor executor;
+
     @Before
     public void setUp() {
         this.partyInfoService = mock(PartyInfoService.class);
         this.partyInfoParser = mock(PartyInfoParser.class);
         this.p2pClient = mock(P2pClient.class);
-        this.partyInfoPoller = new PartyInfoPoller(partyInfoService, partyInfoParser, p2pClient);
+        this.executor = mock(Executor.class);
+
+        doAnswer(
+            (InvocationOnMock invocation) -> {
+                ((Runnable) invocation.getArguments()[0]).run();
+                return null;
+            }
+        ).when(executor).execute(any(Runnable.class));
+
+        when(partyInfoParser.to(any(PartyInfo.class))).thenReturn(DATA);
+
+        this.partyInfoPoller = new PartyInfoPoller(partyInfoService, partyInfoParser, p2pClient, executor);
     }
 
     @After
@@ -49,37 +64,23 @@ public class PartyInfoPollerTest {
 
     @Test
     public void run() {
-
-        doReturn(true).when(p2pClient).sendPartyInfo(TARGET_URL, DATA);
-
         final PartyInfo partyInfo = new PartyInfo(OWN_URL, emptySet(), singleton(new Party(TARGET_URL)));
         doReturn(partyInfo).when(partyInfoService).getPartyInfo();
-
-        doReturn(DATA).when(partyInfoParser).to(partyInfo);
-
-        final PartyInfo updatedPartyInfo = new PartyInfo(OWN_URL, emptySet(), singleton(new Party(TARGET_URL)));
-        doReturn(updatedPartyInfo).when(partyInfoParser).from(DATA);
+        doReturn(true).when(p2pClient).sendPartyInfo(TARGET_URL, DATA);
 
         partyInfoPoller.run();
 
         verify(partyInfoService).getPartyInfo();
-
         verify(partyInfoParser).to(partyInfo);
-
         verify(p2pClient).sendPartyInfo(TARGET_URL, DATA);
     }
 
     @Test
     public void testWhenURLIsOwn() {
-
-        doReturn(true).when(p2pClient).sendPartyInfo(OWN_URL, DATA);
-
         final PartyInfo partyInfo = new PartyInfo(OWN_URL, emptySet(), singleton(new Party(OWN_URL)));
         doReturn(partyInfo).when(partyInfoService).getPartyInfo();
         doReturn(DATA).when(partyInfoParser).to(partyInfo);
-
-        final PartyInfo updatedPartyInfo = mock(PartyInfo.class);
-        doReturn(updatedPartyInfo).when(partyInfoParser).from(DATA);
+        doReturn(true).when(p2pClient).sendPartyInfo(OWN_URL, DATA);
 
         partyInfoPoller.run();
 
@@ -88,71 +89,24 @@ public class PartyInfoPollerTest {
     }
 
     @Test
-    public void testWhenPostFails() {
-
-        doReturn(false).when(p2pClient).sendPartyInfo(TARGET_URL, DATA);
-
-        final PartyInfo partyInfo = new PartyInfo(OWN_URL, emptySet(), singleton(new Party(TARGET_URL)));
-
+    public void exceptionThrowByPostDoesntBubble() {
+        final Set<Party> parties = new HashSet<>(Arrays.asList(new Party(TARGET_URL), new Party(TARGET_URL_2)));
+        final PartyInfo partyInfo = new PartyInfo(OWN_URL, emptySet(), parties);
         doReturn(partyInfo).when(partyInfoService).getPartyInfo();
-        doReturn(DATA).when(partyInfoParser).to(partyInfo);
-
-        final PartyInfo updatedPartyInfo = mock(PartyInfo.class);
-        doReturn(updatedPartyInfo).when(partyInfoParser).from(DATA);
-
-        partyInfoPoller.run();
-
-        verify(partyInfoParser, never()).from(DATA);
-        verify(partyInfoParser).to(partyInfo);
-        verify(partyInfoService).getPartyInfo();
-        verify(p2pClient).sendPartyInfo(TARGET_URL, DATA);
-    }
-
-    @Test
-    public void runThrowsException() {
-
-        final PartyInfo partyInfo = new PartyInfo(OWN_URL, emptySet(), singleton(new Party(TARGET_URL)));
-
-        doReturn(partyInfo).when(partyInfoService).getPartyInfo();
-        doReturn(DATA).when(partyInfoParser).to(partyInfo);
-
-        PartyInfo updatedPartyInfo = mock(PartyInfo.class);
-        doReturn(updatedPartyInfo).when(partyInfoParser).from(DATA);
-
         doThrow(UnsupportedOperationException.class).when(p2pClient).sendPartyInfo(TARGET_URL, DATA);
 
         final Throwable throwable = catchThrowable(partyInfoPoller::run);
-        assertThat(throwable).isInstanceOf(UnsupportedOperationException.class);
+
+        assertThat(throwable).isNull();
 
         verify(p2pClient).sendPartyInfo(TARGET_URL, DATA);
-
+        verify(p2pClient).sendPartyInfo(TARGET_URL_2, DATA);
         verify(partyInfoService).getPartyInfo();
-        verify(partyInfoService, never()).updatePartyInfo(updatedPartyInfo);
-        verify(partyInfoParser, never()).from(DATA);
         verify(partyInfoParser).to(partyInfo);
     }
 
     @Test
-    public void runThrowsConnectionExceptionAndDoesNotThrow() {
-
-        final PartyInfo partyInfo = new PartyInfo(OWN_URL, emptySet(), singleton(new Party(TARGET_URL)));
-
-        doReturn(partyInfo).when(partyInfoService).getPartyInfo();
-        doReturn(DATA).when(partyInfoParser).to(partyInfo);
-
-        final PartyInfo updatedPartyInfo = mock(PartyInfo.class);
-        doReturn(updatedPartyInfo).when(partyInfoParser).from(DATA);
-
-        final RuntimeException connectionException = new RuntimeException(new ConnectException("OUCH"));
-        doThrow(connectionException).when(p2pClient).sendPartyInfo(TARGET_URL, DATA);
-
-        partyInfoPoller.run();
-
-        verify(p2pClient).sendPartyInfo(TARGET_URL, DATA);
-
-        verify(partyInfoService).getPartyInfo();
-        verify(partyInfoParser, never()).from(DATA);
-        verify(partyInfoParser).to(partyInfo);
+    public void constructWithMinimalArgs() {
+        assertThat(new PartyInfoPoller(partyInfoService, p2pClient)).isNotNull();
     }
-
 }

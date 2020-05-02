@@ -1,10 +1,12 @@
 package com.quorum.tessera.transaction;
 
+import com.quorum.tessera.encryption.PublicKey;
 import com.quorum.tessera.partyinfo.ResendResponse;
 import com.quorum.tessera.partyinfo.ResendRequest;
+import com.quorum.tessera.data.MessageHash;
 import com.quorum.tessera.api.model.*;
-import com.quorum.tessera.enclave.model.MessageHash;
 
+import java.util.List;
 
 public interface TransactionManager {
 
@@ -19,8 +21,10 @@ public interface TransactionManager {
     MessageHash storePayload(byte[] toByteArray);
 
     ReceiveResponse receive(ReceiveRequest request);
-    
+
     StoreRawResponse store(StoreRawRequest storeRequest);
 
-    
+    boolean isSender(String ptmHash);
+
+    List<PublicKey> getParticipants(String ptmHash);
 }

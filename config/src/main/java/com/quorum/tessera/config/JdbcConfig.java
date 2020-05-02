@@ -8,21 +8,19 @@ import javax.xml.bind.annotation.XmlElement;
 @XmlAccessorType(XmlAccessType.FIELD)
 public class JdbcConfig extends ConfigItem {
 
-    @XmlElement
-    private String username;
+    @XmlElement private String username;
 
-    @XmlElement
-    private String password;
+    @XmlElement private String password;
 
     @NotNull
     @XmlElement(required = true)
     private String url;
 
-    /**
-     * Auto create tables if no exists
-     */
+    /** Auto create tables if no exists */
     @XmlElement(defaultValue = "false")
     private boolean autoCreateTables;
+
+    @XmlElement private int fetchSize;
 
     public JdbcConfig(String username, String password, String url) {
         this.username = username;
@@ -66,4 +64,11 @@ public class JdbcConfig extends ConfigItem {
         this.autoCreateTables = autoCreateTables;
     }
 
+    public int getFetchSize() {
+        return fetchSize;
+    }
+
+    public void setFetchSize(int fetchSize) {
+        this.fetchSize = fetchSize;
+    }
 }

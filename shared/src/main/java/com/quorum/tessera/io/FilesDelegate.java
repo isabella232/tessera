@@ -1,22 +1,23 @@
 package com.quorum.tessera.io;
 
 import com.quorum.tessera.ServiceLoaderUtil;
+
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
 
 /**
- * <p>
- *  Delegates calls to nio Files functions unchecking IOExceptions
- *  and providing a means of mocking file system interactions.
- * </p>
- * 
+ * Delegates calls to nio Files functions unchecking IOExceptions and providing a means of mocking file system
+ * interactions.
+ *
  * @see java.nio.file.Files
  */
 public interface FilesDelegate {
@@ -37,12 +38,20 @@ public interface FilesDelegate {
         return IOCallback.execute(() -> Files.newInputStream(path, options));
     }
 
+    default OutputStream newOutputStream(Path path, OpenOption... options) {
+        return IOCallback.execute(() -> Files.newOutputStream(path, options));
+    }
+
     default boolean exists(Path path, LinkOption... options) {
         return Files.exists(path, options);
     }
 
     default byte[] readAllBytes(Path path) {
         return IOCallback.execute(() -> Files.readAllBytes(path));
+    }
+
+    default List<String> readAllLines(Path path) {
+        return IOCallback.execute(() -> Files.readAllLines(path));
     }
 
     default Stream<String> lines(Path path) {
@@ -58,8 +67,10 @@ public interface FilesDelegate {
     }
 
     static FilesDelegate create() {
-        return ServiceLoaderUtil.load(FilesDelegate.class).orElse(new FilesDelegate() {
-        });
+        return ServiceLoaderUtil.load(FilesDelegate.class).orElse(new FilesDelegate() {});
     }
 
+    default Path write(Path path, Iterable<? extends CharSequence> lines, OpenOption... options) {
+        return IOCallback.execute(() -> Files.write(path, lines, options));
+    }
 }

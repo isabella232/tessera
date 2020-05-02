@@ -9,11 +9,12 @@
     <parent>
         <groupId>com.jpmorgan.quorum</groupId>
         <artifactId>encryption</artifactId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
     
     <dependencies>
-        
+
+<!--        TODO: remove this as its not used-->
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
             <artifactId>service-locator-api</artifactId>
@@ -24,6 +25,11 @@
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk15on</artifactId>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.jpmorgan.quorum</groupId>
+            <artifactId>shared</artifactId>
         </dependency>
 
     </dependencies>

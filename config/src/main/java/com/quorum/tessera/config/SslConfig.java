@@ -1,5 +1,6 @@
 package com.quorum.tessera.config;
 
+import com.quorum.tessera.config.adapters.CharArrayAdapter;
 import com.quorum.tessera.config.adapters.PathAdapter;
 
 import javax.validation.constraints.NotNull;
@@ -11,7 +12,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 @XmlAccessorType(XmlAccessType.FIELD)
-public class SslConfig {
+public class SslConfig extends ConfigItem {
 
     @NotNull
     @XmlElement(required = true)
@@ -32,8 +33,9 @@ public class SslConfig {
     @XmlJavaTypeAdapter(PathAdapter.class)
     private Path serverTlsCertificatePath;
 
-    @XmlElement
-    private String serverKeyStorePassword;
+    @XmlElement(type = String.class)
+    @XmlJavaTypeAdapter(CharArrayAdapter.class)
+    private char[] serverKeyStorePassword;
 
     @XmlElement(type = String.class)
     @XmlJavaTypeAdapter(PathAdapter.class)
@@ -43,11 +45,11 @@ public class SslConfig {
     @XmlJavaTypeAdapter(value = PathAdapter.class)
     private List<Path> serverTrustCertificates;
 
-    @XmlElement
-    private String serverTrustStorePassword;
+    @XmlElement(type = String.class)
+    @XmlJavaTypeAdapter(CharArrayAdapter.class)
+    private char[] serverTrustStorePassword;
 
-    @XmlElement
-    private SslTrustMode serverTrustMode;
+    @XmlElement private SslTrustMode serverTrustMode;
 
     @XmlElement(type = String.class)
     @XmlJavaTypeAdapter(PathAdapter.class)
@@ -61,8 +63,9 @@ public class SslConfig {
     @XmlJavaTypeAdapter(PathAdapter.class)
     private Path clientTlsCertificatePath;
 
-    @XmlElement
-    private String clientKeyStorePassword;
+    @XmlElement(type = String.class)
+    @XmlJavaTypeAdapter(CharArrayAdapter.class)
+    private char[] clientKeyStorePassword;
 
     @XmlElement(type = String.class)
     @XmlJavaTypeAdapter(PathAdapter.class)
@@ -72,11 +75,11 @@ public class SslConfig {
     @XmlJavaTypeAdapter(value = PathAdapter.class)
     private List<Path> clientTrustCertificates;
 
-    @XmlElement
-    private String clientTrustStorePassword;
+    @XmlElement(type = String.class)
+    @XmlJavaTypeAdapter(CharArrayAdapter.class)
+    private char[] clientTrustStorePassword;
 
-    @XmlElement
-    private SslTrustMode clientTrustMode;
+    @XmlElement private SslTrustMode clientTrustMode;
 
     @XmlElement(type = String.class)
     @XmlJavaTypeAdapter(PathAdapter.class)
@@ -86,24 +89,24 @@ public class SslConfig {
     @XmlJavaTypeAdapter(PathAdapter.class)
     private Path knownServersFile;
 
-    @XmlElement
-    private String environmentVariablePrefix;
+    @XmlElement private String environmentVariablePrefix;
 
-    @XmlElement
-    private SslConfigType sslConfigType;
+    @XmlElement private SslConfigType sslConfigType;
+
+    @XmlElement private String[] excludeCipherSuites;
 
     public SslConfig(
             SslAuthenticationMode tls,
             boolean generateKeyStoreIfNotExisted,
             Path serverKeyStore,
-            String serverKeyStorePassword,
+            char[] serverKeyStorePassword,
             Path serverTrustStore,
-            String serverTrustStorePassword,
+            char[] serverTrustStorePassword,
             SslTrustMode serverTrustMode,
             Path clientKeyStore,
-            String clientKeyStorePassword,
+            char[] clientKeyStorePassword,
             Path clientTrustStore,
-            String clientTrustStorePassword,
+            char[] clientTrustStorePassword,
             SslTrustMode clientTrustMode,
             Path knownClientsFile,
             Path knownServersFile,
@@ -113,8 +116,7 @@ public class SslConfig {
             Path serverTlsCertificatePath,
             Path clientTlsKeyPath,
             Path clientTlsCertificatePath,
-            String environmentVariablePrefix
-    ) {
+            String environmentVariablePrefix) {
 
         this.tls = tls;
         this.generateKeyStoreIfNotExisted = generateKeyStoreIfNotExisted;
@@ -139,9 +141,7 @@ public class SslConfig {
         this.environmentVariablePrefix = environmentVariablePrefix;
     }
 
-    public SslConfig() {
-
-    }
+    public SslConfig() {}
 
     public SslAuthenticationMode getTls() {
         return tls;
@@ -155,7 +155,7 @@ public class SslConfig {
         return serverKeyStore;
     }
 
-    public String getServerKeyStorePassword() {
+    public char[] getServerKeyStorePassword() {
         return serverKeyStorePassword;
     }
 
@@ -163,7 +163,7 @@ public class SslConfig {
         return serverTrustStore;
     }
 
-    public String getServerTrustStorePassword() {
+    public char[] getServerTrustStorePassword() {
         return serverTrustStorePassword;
     }
 
@@ -175,7 +175,7 @@ public class SslConfig {
         return clientKeyStore;
     }
 
-    public String getClientKeyStorePassword() {
+    public char[] getClientKeyStorePassword() {
         return clientKeyStorePassword;
     }
 
@@ -183,7 +183,7 @@ public class SslConfig {
         return clientTrustStore;
     }
 
-    public String getClientTrustStorePassword() {
+    public char[] getClientTrustStorePassword() {
         return clientTrustStorePassword;
     }
 
@@ -247,7 +247,7 @@ public class SslConfig {
         this.serverTlsCertificatePath = serverTlsCertificatePath;
     }
 
-    public void setServerKeyStorePassword(String serverKeyStorePassword) {
+    public void setServerKeyStorePassword(char[] serverKeyStorePassword) {
         this.serverKeyStorePassword = serverKeyStorePassword;
     }
 
@@ -259,7 +259,7 @@ public class SslConfig {
         this.serverTrustCertificates = serverTrustCertificates;
     }
 
-    public void setServerTrustStorePassword(String serverTrustStorePassword) {
+    public void setServerTrustStorePassword(char[] serverTrustStorePassword) {
         this.serverTrustStorePassword = serverTrustStorePassword;
     }
 
@@ -279,7 +279,7 @@ public class SslConfig {
         this.clientTlsCertificatePath = clientTlsCertificatePath;
     }
 
-    public void setClientKeyStorePassword(String clientKeyStorePassword) {
+    public void setClientKeyStorePassword(char[] clientKeyStorePassword) {
         this.clientKeyStorePassword = clientKeyStorePassword;
     }
 
@@ -291,7 +291,7 @@ public class SslConfig {
         this.clientTrustCertificates = clientTrustCertificates;
     }
 
-    public void setClientTrustStorePassword(String clientTrustStorePassword) {
+    public void setClientTrustStorePassword(char[] clientTrustStorePassword) {
         this.clientTrustStorePassword = clientTrustStorePassword;
     }
 
@@ -317,5 +317,13 @@ public class SslConfig {
 
     public void setSslConfigType(SslConfigType sslConfigType) {
         this.sslConfigType = sslConfigType;
+    }
+
+    public String[] getExcludeCipherSuites() {
+        return excludeCipherSuites;
+    }
+
+    public void setExcludeCipherSuites(String[] excludeCipherSuites) {
+        this.excludeCipherSuites = excludeCipherSuites;
     }
 }

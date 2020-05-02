@@ -1,14 +1,16 @@
 package com.quorum.tessera.config;
 
-import com.quorum.tessera.config.keypairs.*;
+import com.quorum.tessera.config.keypairs.AzureVaultKeyPair;
+import com.quorum.tessera.config.keypairs.DirectKeyPair;
+import com.quorum.tessera.config.keypairs.InlineKeypair;
+import com.quorum.tessera.config.keys.KeyEncryptor;
 import org.junit.Test;
 
 import javax.validation.ConstraintViolation;
 import javax.validation.Validation;
 import javax.validation.Validator;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +21,8 @@ public class ValidationTest {
 
     private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 
+    private KeyEncryptor keyEncryptor = mock(KeyEncryptor.class);
+
     @Test
     public void validateArgonOptions() {
         ArgonOptions options = new ArgonOptions("d", 10, 20, 30);
@@ -26,7 +30,6 @@ public class ValidationTest {
         Set<ConstraintViolation<ArgonOptions>> violations = validator.validate(options);
 
         assertThat(violations).isEmpty();
-
     }
 
     @Test
@@ -36,7 +39,6 @@ public class ValidationTest {
         Set<ConstraintViolation<ArgonOptions>> violations = validator.validate(options);
 
         assertThat(violations).hasSize(1);
-
     }
 
     @Test
@@ -47,16 +49,16 @@ public class ValidationTest {
 
         assertThat(violations).hasSize(3);
         assertThat(options.getAlgorithm()).isEqualTo("id");
-
     }
 
     @Test
     public void inlineKeyPairNaClFailure() {
+
         KeyDataConfig keyConfig = mock(KeyDataConfig.class);
         when(keyConfig.getType()).thenReturn(PrivateKeyType.UNLOCKED);
         when(keyConfig.getValue()).thenReturn("NACL_FAILURE");
 
-        InlineKeypair keyPair = new InlineKeypair("validkey", keyConfig);
+        InlineKeypair keyPair = new InlineKeypair("validkey", keyConfig, keyEncryptor);
 
         Set<ConstraintViolation<InlineKeypair>> violations = validator.validate(keyPair);
 
@@ -64,7 +66,9 @@ public class ValidationTest {
 
         ConstraintViolation<InlineKeypair> violation = violations.iterator().next();
 
-        assertThat(violation.getMessageTemplate()).isEqualTo("Could not decrypt the private key with the provided password, please double check the passwords provided");
+        assertThat(violation.getMessageTemplate())
+                .isEqualTo(
+                        "Could not decrypt the private key with the provided password, please double check the passwords provided");
     }
 
     @Test
@@ -90,7 +94,7 @@ public class ValidationTest {
         KeyDataConfig keyConfig = mock(KeyDataConfig.class);
         when(keyConfig.getType()).thenReturn(PrivateKeyType.UNLOCKED);
         when(keyConfig.getValue()).thenReturn("validkey");
-        InlineKeypair keyPair = new InlineKeypair("INVALID_BASE", keyConfig);
+        InlineKeypair keyPair = new InlineKeypair("INVALID_BASE", keyConfig, keyEncryptor);
 
         Set<ConstraintViolation<InlineKeypair>> violations = validator.validate(keyPair);
 
@@ -107,7 +111,7 @@ public class ValidationTest {
 
         List<String> alwaysSendTo = singletonList("BOGUS");
 
-        Config config = new Config(null, null, null, null, alwaysSendTo, false, false);
+        Config config = new Config(null, null, null, null, alwaysSendTo, null, false, false);
 
         Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "alwaysSendTo");
 
@@ -125,55 +129,15 @@ public class ValidationTest {
 
         List<String> alwaysSendTo = singletonList(value);
 
-        Config config = new Config(null, null, null, null, alwaysSendTo, false, false);
+        Config config = new Config(null, null, null, null, alwaysSendTo, null, false, false);
 
         Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "alwaysSendTo");
 
         assertThat(violations).isEmpty();
     }
 
-    @Test
-    public void keypairPathsValidation() {
 
-        final Path publicKeyPath = Paths.get(UUID.randomUUID().toString());
-        final Path privateKeyPath = Paths.get(UUID.randomUUID().toString());
 
-        final ConfigKeyPair keyPair = new FilesystemKeyPair(publicKeyPath, privateKeyPath);
-
-        final KeyConfiguration keyConfiguration = new KeyConfiguration(null, null, singletonList(keyPair), null, null);
-
-        final Set<ConstraintViolation<KeyConfiguration>> violations = validator.validate(keyConfiguration);
-        assertThat(violations).hasSize(2);
-
-        final Iterator<ConstraintViolation<KeyConfiguration>> iterator = violations.iterator();
-
-        ConstraintViolation<KeyConfiguration> violation1 = iterator.next();
-        assertThat(violation1.getMessageTemplate()).isEqualTo("File does not exist");
-
-        ConstraintViolation<KeyConfiguration> violation2 = iterator.next();
-        assertThat(violation2.getMessageTemplate()).isEqualTo("File does not exist");
-
-        final List<String> paths = Arrays.asList(
-                violation1.getPropertyPath().toString(), violation2.getPropertyPath().toString()
-        );
-        assertThat(paths).containsExactlyInAnyOrder("keyData[0].publicKeyPath", "keyData[0].privateKeyPath");
-    }
-
-    @Test
-    public void keypairInlineValidation() {
-
-        final ConfigKeyPair keyPair = new DirectKeyPair("notvalidbase64", "c==");
-
-        KeyConfiguration keyConfiguration = new KeyConfiguration(null, null, singletonList(keyPair), null, null);
-
-        Set<ConstraintViolation<KeyConfiguration>> violations = validator.validate(keyConfiguration);
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<KeyConfiguration> violation = violations.iterator().next();
-
-        assertThat(violation.getMessageTemplate()).isEqualTo("Invalid Base64 key provided");
-        assertThat(violation.getPropertyPath().toString()).endsWith("privateKey");
-    }
 
     @Test
     public void azureKeyPairIdsAllowedCharacterSetIsAlphanumericAndDash() {
@@ -192,8 +156,10 @@ public class ValidationTest {
         Set<ConstraintViolation<AzureVaultKeyPair>> violations = validator.validate(keyPair);
         assertThat(violations).hasSize(2);
 
-        assertThat(violations).extracting("messageTemplate")
-                .containsExactly("Azure Key Vault key IDs can only contain alphanumeric characters and dashes (-)",
+        assertThat(violations)
+                .extracting("messageTemplate")
+                .containsExactly(
+                        "Azure Key Vault key IDs can only contain alphanumeric characters and dashes (-)",
                         "Azure Key Vault key IDs can only contain alphanumeric characters and dashes (-)");
     }
 
@@ -214,7 +180,8 @@ public class ValidationTest {
         Set<ConstraintViolation<AzureVaultKeyPair>> violations = validator.validate(keyPair);
         assertThat(violations).hasSize(2);
 
-        assertThat(violations).extracting("messageTemplate")
+        assertThat(violations)
+                .extracting("messageTemplate")
                 .containsExactly("length must be 32 characters", "length must be 32 characters");
     }
 
@@ -226,7 +193,8 @@ public class ValidationTest {
         Set<ConstraintViolation<AzureVaultKeyPair>> violations = validator.validate(keyPair);
         assertThat(violations).hasSize(2);
 
-        assertThat(violations).extracting("messageTemplate")
+        assertThat(violations)
+                .extracting("messageTemplate")
                 .containsExactly("length must be 32 characters", "length must be 32 characters");
     }
 
@@ -239,7 +207,9 @@ public class ValidationTest {
         Set<ConstraintViolation<AzureVaultKeyPair>> violations = validator.validate(azureVaultKeyPair);
         assertThat(violations).hasSize(1);
 
-        assertThat(violations.iterator().next().getMessage()).isEqualTo("Only one key version was provided for the Azure vault key pair.  Either set the version for both the public and private key, or leave both unset");
+        assertThat(violations.iterator().next().getMessage())
+                .isEqualTo(
+                        "Only one key version was provided for the Azure vault key pair.  Either set the version for both the public and private key, or leave both unset");
     }
 
     @Test
@@ -251,90 +221,9 @@ public class ValidationTest {
         Set<ConstraintViolation<AzureVaultKeyPair>> violations = validator.validate(azureVaultKeyPair);
         assertThat(violations).hasSize(1);
 
-        assertThat(violations.iterator().next().getMessage()).isEqualTo("Only one key version was provided for the Azure vault key pair.  Either set the version for both the public and private key, or leave both unset");
-    }
-
-    @Test
-    public void azureKeyPairProvidedWithoutKeyVaultConfigCreatesViolation() {
-        AzureVaultKeyPair keyPair = new AzureVaultKeyPair("publicVauldId", "privateVaultId", null, null);
-        KeyConfiguration keyConfiguration = new KeyConfiguration(null, null, singletonList(keyPair), null, null);
-        Config config = new Config(null, null, null, keyConfiguration, null, false, false);
-
-        Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "keys");
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<Config> violation = violations.iterator().next();
-        assertThat(violation.getMessageTemplate()).isEqualTo("{ValidKeyVaultConfiguration.azure.message}");
-    }
-
-    @Test
-    public void azureKeyPairProvidedWithHashicorpKeyVaultConfigCreatesViolation() {
-        AzureVaultKeyPair keyPair = new AzureVaultKeyPair("publicVauldId", "privateVaultId", null, null);
-
-        KeyConfiguration keyConfiguration = new KeyConfiguration();
-        keyConfiguration.setKeyData(singletonList(keyPair));
-
-        HashicorpKeyVaultConfig hashicorpConfig = new HashicorpKeyVaultConfig();
-        keyConfiguration.setHashicorpKeyVaultConfig(hashicorpConfig);
-
-        Config config = new Config();
-        config.setKeys(keyConfiguration);
-
-        Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "keys");
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<Config> violation = violations.iterator().next();
-        assertThat(violation.getMessageTemplate()).isEqualTo("{ValidKeyVaultConfiguration.azure.message}");
-    }
-
-    @Test
-    public void hashicorpKeyPairProvidedWithoutKeyVaultConfigCreatesViolation() {
-        HashicorpVaultKeyPair keyPair = new HashicorpVaultKeyPair("pubId", "privdId", "secretEngine", "secretName", null);
-
-        KeyConfiguration keyConfiguration = new KeyConfiguration();
-        keyConfiguration.setKeyData(singletonList(keyPair));
-        keyConfiguration.setHashicorpKeyVaultConfig(null);
-
-        Config config = new Config();
-        config.setKeys(keyConfiguration);
-
-        Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "keys");
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<Config> violation = violations.iterator().next();
-        assertThat(violation.getMessageTemplate()).isEqualTo("{ValidKeyVaultConfiguration.hashicorp.message}");
-    }
-
-    @Test
-    public void hashicorpKeyPairProvidedWithAzureKeyVaultConfigCreatesViolation() {
-        HashicorpVaultKeyPair keyPair = new HashicorpVaultKeyPair("pubId", "privdId", "secretEngine", "secretName", null);
-
-        KeyConfiguration keyConfiguration = new KeyConfiguration();
-        keyConfiguration.setKeyData(singletonList(keyPair));
-        keyConfiguration.setHashicorpKeyVaultConfig(null);
-
-        AzureKeyVaultConfig azureConfig = new AzureKeyVaultConfig();
-        keyConfiguration.setAzureKeyVaultConfig(azureConfig);
-
-        Config config = new Config();
-        config.setKeys(keyConfiguration);
-
-        Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "keys");
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<Config> violation = violations.iterator().next();
-        assertThat(violation.getMessageTemplate()).isEqualTo("{ValidKeyVaultConfiguration.hashicorp.message}");
-    }
-
-    @Test
-    public void nonKeyVaultPairProvidedWithoutAzureAndHashicorpKeyVaultConfigDoesNotCreateViolation() {
-        DirectKeyPair keyPair = new DirectKeyPair("pub", "priv");
-
-        KeyConfiguration keyConfiguration = new KeyConfiguration(null, null, singletonList(keyPair), null, null);
-        Config config = new Config(null, null, null, keyConfiguration, null, false, false);
-
-        Set<ConstraintViolation<Config>> violations = validator.validateProperty(config, "keys");
-        assertThat(violations).hasSize(0);
+        assertThat(violations.iterator().next().getMessage())
+                .isEqualTo(
+                        "Only one key version was provided for the Azure vault key pair.  Either set the version for both the public and private key, or leave both unset");
     }
 
     @Test
@@ -348,19 +237,6 @@ public class ValidationTest {
         assertThat(violation.getMessageTemplate()).isEqualTo("{javax.validation.constraints.NotNull.message}");
     }
 
-    @Test
-    public void azureVaultKeyPairProvidedButKeyVaultConfigHasNullUrlCreatesNotNullViolation() {
-        AzureVaultKeyPair keyPair = new AzureVaultKeyPair("pubId", "privId", null, null);
-        AzureKeyVaultConfig keyVaultConfig = new AzureKeyVaultConfig(null);
-        KeyConfiguration keyConfiguration = new KeyConfiguration(null, null, singletonList(keyPair), keyVaultConfig, null);
-
-        Set<ConstraintViolation<KeyConfiguration>> violations = validator.validate(keyConfiguration);
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<KeyConfiguration> violation = violations.iterator().next();
-        assertThat(violation.getMessageTemplate()).isEqualTo("{javax.validation.constraints.NotNull.message}");
-        assertThat(violation.getPropertyPath().toString()).isEqualTo("azureKeyVaultConfig.url");
-    }
 
     @Test
     public void hashicorpVaultConfigWithNoUrlCreatesNotNullViolation() {
@@ -374,23 +250,9 @@ public class ValidationTest {
     }
 
     @Test
-    public void hashicorpVaultKeyPairProvidedButKeyVaultConfigHasNullUrlCreatesNotNullViolation() {
-        HashicorpVaultKeyPair keyPair = new HashicorpVaultKeyPair("pubId", "privId", "secretEngine", "secretName", null);
-        HashicorpKeyVaultConfig keyVaultConfig = new HashicorpKeyVaultConfig();
-        KeyConfiguration keyConfiguration = new KeyConfiguration(null, null, singletonList(keyPair), null, keyVaultConfig);
-
-        Set<ConstraintViolation<KeyConfiguration>> violations = validator.validate(keyConfiguration);
-        assertThat(violations).hasSize(1);
-
-        ConstraintViolation<KeyConfiguration> violation = violations.iterator().next();
-        assertThat(violation.getMessageTemplate()).isEqualTo("{javax.validation.constraints.NotNull.message}");
-        assertThat(violation.getPropertyPath().toString()).isEqualTo("hashicorpKeyVaultConfig.url");
-    }
-
-    @Test
     public void serverAddressValidations() {
 
-        String[] invalidAddresses = {"/foo/bar","foo@bar.com,:/fff.ll","file:/tmp/valid.somename"};
+        String[] invalidAddresses = {"/foo/bar", "foo@bar.com,:/fff.ll", "file:/tmp/valid.somename"};
 
         ServerConfig config = new ServerConfig();
         for (String sample : invalidAddresses) {
@@ -399,12 +261,110 @@ public class ValidationTest {
             assertThat(validresult).hasSize(1);
         }
 
-        String[] validSamples = {"unix:/foo/bar.ipc","http://localhost:8080","https://somestrangedomain.com:8080"};
+        String[] validSamples = {"unix:/foo/bar.ipc", "http://localhost:8080", "https://somestrangedomain.com:8080"};
         for (String sample : validSamples) {
             config.setServerAddress(sample);
             Set<ConstraintViolation<ServerConfig>> validresult = validator.validateProperty(config, "serverAddress");
             assertThat(validresult).isEmpty();
         }
+    }
+
+    @Test
+    public void unknownServerType() {
+        final ServerConfig serverConfig = new ServerConfig();
+        serverConfig.setApp(null);
+
+        final Config config = new Config();
+        config.setServerConfigs(Collections.singletonList(serverConfig));
+
+        final Set<ConstraintViolation<Config>> invalidresult = validator.validate(config);
+        final List<ConstraintViolation<Config>> invalidServerAppTypeResults = invalidresult.stream()
+            .filter(v -> v.getMessageTemplate().contains("app must be provided for serverConfig and be one of P2P, Q2T, ThirdParty, ENCLAVE"))
+            .collect(Collectors.toList());
+
+        assertThat(invalidServerAppTypeResults).hasSize(1);
+    }
+
+    @Test
+    public void adminServerTypeDeprecated() {
+        final ServerConfig serverConfig = new ServerConfig();
+        serverConfig.setApp(AppType.ADMIN);
+
+        final Config config = new Config();
+        config.setServerConfigs(Collections.singletonList(serverConfig));
+
+        final Set<ConstraintViolation<Config>> invalidresult = validator.validate(config);
+        final List<ConstraintViolation<Config>> invalidServerAppTypeResults = invalidresult.stream()
+            .filter(v -> v.getMessageTemplate().contains("app must be provided for serverConfig and be one of P2P, Q2T, ThirdParty, ENCLAVE"))
+            .collect(Collectors.toList());
+
+        assertThat(invalidServerAppTypeResults).hasSize(1);
+    }
+
+    @Test
+    public void configHasKeysOrIsRemoteEnclaveNiether() {
+
+        Config config = new Config();
+
+        List<ConstraintViolation<Config>> constrainViolations = validator.validate(config)
+            .stream()
+            .filter(v -> v.getMessageTemplate().equals("{HasKeysOrRemoteEnclave.message}"))
+            .collect(Collectors.toList());
+
+        assertThat(constrainViolations).hasSize(1);
+
+    }
+
+    @Test
+    public void configHasKeysOrIsRemoteEnclaveRemoteEnclave() {
+
+        Config config = new Config();
+        config.setServerConfigs(new ArrayList<>());
+        ServerConfig enclaveConfig = new ServerConfig() {{
+            setApp(AppType.ENCLAVE);
+        }};
+        config.getServerConfigs().add(enclaveConfig);
+
+        List<ConstraintViolation<Config>> constrainViolations = validator.validate(config)
+            .stream()
+            .filter(v -> v.getMessageTemplate().equals("{HasKeysOrRemoteEnclave.message}"))
+            .collect(Collectors.toList());
+
+        assertThat(constrainViolations).isEmpty();
+
+    }
+
+    @Test
+    public void configHasKeysOrIsRemoteEclaveWithKeys() {
+
+        Config config = new Config();
+        config.setKeys(new KeyConfiguration());
+
+        List<ConstraintViolation<Config>> constrainViolations = validator.validate(config)
+            .stream()
+            .filter(v -> v.getMessageTemplate().equals("{HasKeysOrRemoteEnclave.message}"))
+            .collect(Collectors.toList());
+
+        assertThat(constrainViolations).isEmpty();
+
+    }
+
+    @Test
+    public void configHasKeysOrIsRemoteEnclaveNoEnclaveServerNorKeys() {
+
+        Config config = new Config();
+        config.setServerConfigs(new ArrayList<>());
+        ServerConfig enclaveConfig = new ServerConfig() {{
+            setApp(AppType.P2P);
+        }};
+        config.getServerConfigs().add(enclaveConfig);
+
+        List<ConstraintViolation<Config>> constrainViolations = validator.validate(config)
+            .stream()
+            .filter(v -> v.getMessageTemplate().equals("{HasKeysOrRemoteEnclave.message}"))
+            .collect(Collectors.toList());
+
+        assertThat(constrainViolations).hasSize(1);
 
     }
 

@@ -1,18 +1,34 @@
 package com.quorum.tessera.data.migration;
 
+import com.quorum.tessera.cli.CliResult;
+import com.quorum.tessera.cli.CliType;
+import com.quorum.tessera.cli.parsers.ConfigConverter;
+import com.quorum.tessera.config.Config;
+import picocli.CommandLine;
+
 import java.util.Arrays;
 
 public class Main {
-    
+
     private Main() {
         throw new UnsupportedOperationException("");
     }
-    
+
     public static void main(final String... args) {
 
+        System.setProperty(CliType.CLI_TYPE_KEY, CliType.DATA_MIGRATION.name());
+
         try {
-            final int result = new CmdLineExecutor().execute(args);
-            System.exit(result);
+            final CommandLine commandLine = new CommandLine(new CmdLineExecutor());
+            commandLine
+                    .registerConverter(Config.class, new ConfigConverter())
+                    .setSeparator(" ")
+                    .setCaseInsensitiveEnumValuesAllowed(true);
+
+            commandLine.execute(args);
+            final CliResult cliResult = commandLine.getExecutionResult();
+
+            System.exit(cliResult.getStatus());
         } catch (final Exception ex) {
             System.err.println("An error has occurred: " + ex.getMessage());
 
@@ -24,7 +40,5 @@ public class Main {
 
             System.exit(1);
         }
-
     }
-    
 }

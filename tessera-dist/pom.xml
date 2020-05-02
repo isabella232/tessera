@@ -4,7 +4,7 @@
     <parent>
         <groupId>com.jpmorgan.quorum</groupId>
         <artifactId>tessera</artifactId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
     <artifactId>tessera-dist</artifactId>
     <packaging>pom</packaging>
@@ -14,7 +14,6 @@
     <modules>
         <module>tessera-launcher</module>
         <module>tessera-app</module>
-        <module>tessera-grpc</module>
         <module>tessera-simple</module>
     </modules>
     <dependencyManagement>
@@ -22,9 +21,10 @@
             <dependency>
                 <groupId>com.jpmorgan.quorum</groupId>
                 <artifactId>tessera-launcher</artifactId>
-                <version>0.10-SNAPSHOT</version>
+                <version>0.10.6-SNAPSHOT</version>
                 <type>jar</type>
             </dependency>
+
         </dependencies>
     </dependencyManagement>
     <build>
@@ -43,9 +43,10 @@
                         <transformers>
 
                             <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                <mainClass>com.quorum.tessera.Launcher</mainClass>
+                                <mainClass>com.quorum.tessera.launcher.Main</mainClass>
                                 <manifestEntries>
                                     <Tessera-Version>${project.version}</Tessera-Version>
+                                    <Specification-Version>${project.version}</Specification-Version>
                                 </manifestEntries>
                             </transformer>
 
@@ -86,15 +87,5 @@
         </pluginManagement>
     </build>
 
-    <profiles>
-        <profile>
-            <id>afterjdk9</id>
-            <activation>
-                <jdk>[9,12)</jdk>
-            </activation>
-            <properties>
-                <dist.classfier>jdk${java.vm.specification.version}_app</dist.classfier>
-            </properties>
-        </profile>
-    </profiles>
+
 </project>

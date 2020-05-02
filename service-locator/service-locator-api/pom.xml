@@ -11,7 +11,16 @@
     <parent>
         <groupId>com.jpmorgan.quorum</groupId>
         <artifactId>service-locator</artifactId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
+
+    <dependencies>
+
+        <dependency>
+            <groupId>com.jpmorgan.quorum</groupId>
+            <artifactId>shared</artifactId>
+        </dependency>
+
+    </dependencies>
     
 </project>

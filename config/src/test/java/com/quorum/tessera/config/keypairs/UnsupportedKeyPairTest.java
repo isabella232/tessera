@@ -11,14 +11,15 @@ public class UnsupportedKeyPairTest {
 
     @Before
     public void setUp() {
-        this.keyPair = new UnsupportedKeyPair(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        this.keyPair =
+                new UnsupportedKeyPair(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Test
     public void getPasswordAlwaysReturnsNull() {
         assertThat(keyPair.getPassword()).isNull();
 
-        keyPair.withPassword("password");
+        keyPair.withPassword("password".toCharArray());
 
         assertThat(keyPair.getPassword()).isNull();
     }
@@ -36,6 +37,7 @@ public class UnsupportedKeyPairTest {
         assertThat(keyPair.getHashicorpVaultSecretVersion()).isEqualTo("1");
         assertThat(keyPair.getAzureVaultPublicKeyVersion()).isEqualTo("pubVer");
         assertThat(keyPair.getAzureVaultPrivateKeyVersion()).isEqualTo("privVer");
+        
     }
 
 }

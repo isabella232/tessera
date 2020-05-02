@@ -1,5 +1,6 @@
 package com.quorum.tessera.config;
 
+import com.quorum.tessera.config.adapters.MapAdapter;
 import com.quorum.tessera.config.constraints.ValidServerAddress;
 import com.quorum.tessera.config.constraints.ValidSsl;
 
@@ -8,8 +9,11 @@ import javax.validation.constraints.NotNull;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Collections;
+import java.util.Map;
 import java.util.Objects;
 
 @XmlAccessorType(XmlAccessType.FIELD)
@@ -19,27 +23,16 @@ public class ServerConfig extends ConfigItem {
     @XmlElement(required = true)
     private AppType app;
 
-    @NotNull
-    @XmlElement(required = true)
-    private boolean enabled;
+    @XmlElement private CommunicationType communicationType;
 
-    @XmlElement
-    private CommunicationType communicationType;
+    @Valid @XmlElement @ValidSsl private SslConfig sslConfig;
 
-    @Valid
-    @XmlElement
-    @ValidSsl
-    private SslConfig sslConfig;
-
-    @Valid
-    @XmlElement
-    private InfluxConfig influxConfig;
+    @Valid @XmlElement private InfluxConfig influxConfig;
 
     @ValidServerAddress(
-        message = "Binding Address is invalid",
-        isBindingAddress = true,
-        supportedSchemes = {"http", "https"}
-    )
+            message = "Binding Address is invalid",
+            isBindingAddress = true,
+            supportedSchemes = {"http", "https"})
     @XmlElement
     private String bindingAddress;
 
@@ -50,16 +43,23 @@ public class ServerConfig extends ConfigItem {
 
     @XmlElement(name = "cors")
     private CrossDomainConfig crossDomainConfig;
-    
-    public ServerConfig(final AppType app,
-                        final boolean enabled,
-                        final String serverAddress,
-                        final CommunicationType communicationType,
-                        final SslConfig sslConfig,
-                        final InfluxConfig influxConfig,
-                        final String bindingAddress) {
+
+    @XmlJavaTypeAdapter(MapAdapter.class)
+    @XmlElement
+    private Map<String, String> properties = Collections.emptyMap();
+
+    /**
+     * @deprecated USe default constructor and setters
+     */
+    @Deprecated
+    public ServerConfig(
+            final AppType app,
+            final String serverAddress,
+            final CommunicationType communicationType,
+            final SslConfig sslConfig,
+            final InfluxConfig influxConfig,
+            final String bindingAddress) {
         this.app = app;
-        this.enabled = enabled;
         this.serverAddress = serverAddress;
         this.communicationType = communicationType;
         this.sslConfig = sslConfig;
@@ -67,9 +67,7 @@ public class ServerConfig extends ConfigItem {
         this.bindingAddress = bindingAddress;
     }
 
-    public ServerConfig() {
-
-    }
+    public ServerConfig() {}
 
     public String getBindingAddress() {
         return this.bindingAddress == null ? this.serverAddress : this.bindingAddress;
@@ -101,14 +99,6 @@ public class ServerConfig extends ConfigItem {
 
     public void setApp(AppType app) {
         this.app = app;
-    }
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
     }
 
     public CommunicationType getCommunicationType() {
@@ -159,4 +149,11 @@ public class ServerConfig extends ConfigItem {
         this.crossDomainConfig = crossDomainConfig;
     }
 
+    public Map<String, String> getProperties() {
+        return properties;
+    }
+
+    public void setProperties(Map<String, String> properties) {
+        this.properties = properties;
+    }
 }

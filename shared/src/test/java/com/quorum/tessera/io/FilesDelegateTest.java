@@ -1,16 +1,19 @@
 package com.quorum.tessera.io;
 
+import org.assertj.core.util.Strings;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -36,7 +39,6 @@ public class FilesDelegateTest {
 
         assertThat(filesDelegate.notExists(existentFile)).isFalse();
         assertThat(filesDelegate.notExists(nonExistentFile)).isTrue();
-
     }
 
     @Test
@@ -56,7 +58,6 @@ public class FilesDelegateTest {
         Path result = filesDelegate.createFile(toBeCreated);
         result.toFile().deleteOnExit();
         assertThat(toBeCreated).exists().isEqualTo(result);
-
     }
 
     @Test
@@ -71,6 +72,17 @@ public class FilesDelegateTest {
     }
 
     @Test
+    public void newOutputStream() throws Exception {
+
+        Path file = Files.createTempFile(UUID.randomUUID().toString(), ".txt");
+        file.toFile().deleteOnExit();
+
+        OutputStream result = filesDelegate.newOutputStream(file);
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
     public void readAllBytes() throws Exception {
         byte[] someBytes = UUID.randomUUID().toString().getBytes();
         Path file = Files.createTempFile(UUID.randomUUID().toString(), ".txt");
@@ -80,7 +92,20 @@ public class FilesDelegateTest {
         byte[] result = filesDelegate.readAllBytes(file);
 
         assertThat(result).isEqualTo(someBytes);
+    }
 
+    @Test
+    public void readAllLines() throws Exception {
+        final List<String> lines = Arrays.asList("line1", "line2");
+        final byte[] linesBytes = Strings.join(lines).with("\n").getBytes();
+
+        final Path file = Files.createTempFile(UUID.randomUUID().toString(), ".txt");
+        file.toFile().deleteOnExit();
+        Files.write(file, linesBytes);
+
+        final List<String> result = filesDelegate.readAllLines(file);
+
+        assertThat(result).isEqualTo(lines);
     }
 
     @Test
@@ -91,7 +116,6 @@ public class FilesDelegateTest {
 
         assertThat(filesDelegate.exists(existentFile)).isTrue();
         assertThat(filesDelegate.exists(nonExistentFile)).isFalse();
-
     }
 
     @Test
@@ -119,19 +143,26 @@ public class FilesDelegateTest {
         Path result = filesDelegate.write(somefile, somebytes, StandardOpenOption.CREATE_NEW);
         assertThat(result).exists();
         assertThat(Files.readAllBytes(result)).isEqualTo(somebytes);
-
     }
 
     @Test
     public void setPosixFilePermissions() throws IOException {
         Path somefile = Files.createTempFile("setPosixFilePermissions", ".txt");
         somefile.toFile().deleteOnExit();
-        Set<PosixFilePermission> perms = Stream.of(PosixFilePermission.values())
-                .collect(Collectors.toSet());
+        Set<PosixFilePermission> perms = Stream.of(PosixFilePermission.values()).collect(Collectors.toSet());
 
         Path result = filesDelegate.setPosixFilePermissions(somefile, perms);
         assertThat(Files.getPosixFilePermissions(result)).containsAll(perms);
-
     }
 
+    @Test
+    public void writeLinesWithOptions() throws Exception {
+        Path somefile = Paths.get("writeLinesWithOptionsTest");
+        somefile.toFile().deleteOnExit();
+
+        List<String> lines = Arrays.asList("Line one", "Line 2");
+        Path result = filesDelegate.write(somefile, lines, StandardOpenOption.CREATE_NEW);
+        assertThat(result).exists();
+        assertThat(Files.lines(result)).containsExactlyElementsOf(lines);
+    }
 }

@@ -1,7 +1,6 @@
 package com.quorum.tessera.config.constraints;
 
 import com.quorum.tessera.config.*;
-import com.quorum.tessera.config.apps.P2PApp;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -25,7 +24,6 @@ public class ServerConfigValidatorTest {
         cvc = mock(ConstraintValidatorContext.class);
         serverConfig = new ServerConfig();
         serverConfig.setApp(AppType.P2P);
-        serverConfig.setEnabled(true);
         serverConfig.setServerAddress("localhost:123");
         serverConfig.setCommunicationType(CommunicationType.REST);
         serverConfig.setSslConfig(null);
@@ -35,7 +33,7 @@ public class ServerConfigValidatorTest {
         validator = new ServerConfigValidator();
 
         when(cvc.buildConstraintViolationWithTemplate(anyString()))
-            .thenReturn(mock(ConstraintValidatorContext.ConstraintViolationBuilder.class));
+                .thenReturn(mock(ConstraintValidatorContext.ConstraintViolationBuilder.class));
     }
 
     @After
@@ -51,8 +49,6 @@ public class ServerConfigValidatorTest {
     @Test
     public void isValidWhenValidDataIsSupplied() {
         assertThat(serverConfig.getApp()).isSameAs(AppType.P2P);
-        assertThat(serverConfig.getApp().getIntf()).isSameAs(P2PApp.class);
-        assertThat(serverConfig.isEnabled()).isTrue();
         assertThat(serverConfig.getServerUri()).isNotNull();
         assertThat(serverConfig.getCommunicationType()).isSameAs(CommunicationType.REST);
         assertThat(serverConfig.getSslConfig()).isNull();
@@ -62,12 +58,27 @@ public class ServerConfigValidatorTest {
     }
 
     @Test
-    public void testInvalidCommTypeForApp() {
-        serverConfig.setApp(AppType.THIRD_PARTY);
-        serverConfig.setCommunicationType(CommunicationType.GRPC);
+    public void unsupportedCommunicationType() {
+
+        serverConfig.setCommunicationType(CommunicationType.WEB_SOCKET);
+
         assertThat(validator.isValid(serverConfig, cvc)).isFalse();
         verify(cvc).disableDefaultConstraintViolation();
         verify(cvc).buildConstraintViolationWithTemplate(anyString());
     }
 
+    @Test
+    public void allowCorsOnlyInThirdPartyServer() {
+
+        serverConfig.setApp(AppType.P2P);
+
+        CrossDomainConfig cors = new CrossDomainConfig();
+        cors.setAllowCredentials(true);
+
+        serverConfig.setCrossDomainConfig(cors);
+
+        assertThat(validator.isValid(serverConfig, cvc)).isFalse();
+        verify(cvc).disableDefaultConstraintViolation();
+        verify(cvc).buildConstraintViolationWithTemplate(anyString());
+    }
 }

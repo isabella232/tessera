@@ -1,13 +1,8 @@
 package com.quorum.tessera.argon2;
 
-import java.util.ServiceLoader;
+import com.quorum.tessera.ServiceLoaderUtil;
 
-/**
- * Provides hashing functions using the Argon2 algorithms
- * Validation of various inputs is left to the implementor, although
- * the validation should be consistent amongst implementations.
- * (i.e. the same inputs should work for any implementation)
- */
+/** Provides hashing functions using the Argon2 class of algorithms. */
 public interface Argon2 {
 
     /**
@@ -18,7 +13,7 @@ public interface Argon2 {
      * @param salt the salt to apply when hashing
      * @return the result which contains the output, as well as the input parameters
      */
-    ArgonResult hash(ArgonOptions options, String password, byte[] salt);
+    ArgonResult hash(ArgonOptions options, char[] password, byte[] salt);
 
     /**
      * Hash the password using the given salt and some default options
@@ -27,10 +22,10 @@ public interface Argon2 {
      * @param salt the salt to apply when hashing
      * @return the result which contains the output, as well as the input parameters
      */
-    ArgonResult hash(String password, byte[] salt);
+    ArgonResult hash(char[] password, byte[] salt);
 
+    // TODO: move into factory and return the stream itself
     static Argon2 create() {
-        return ServiceLoader.load(Argon2.class).iterator().next();
+        return ServiceLoaderUtil.loadAll(Argon2.class).findAny().get();
     }
-
 }

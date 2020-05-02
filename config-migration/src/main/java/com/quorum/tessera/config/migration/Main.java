@@ -1,17 +1,28 @@
 package com.quorum.tessera.config.migration;
 
 import com.quorum.tessera.cli.CliResult;
+import com.quorum.tessera.cli.CliType;
+import com.quorum.tessera.cli.parsers.ConfigConverter;
+import com.quorum.tessera.config.Config;
+import picocli.CommandLine;
 
 public class Main {
 
     public static void main(String... args) {
         System.setProperty("javax.xml.bind.JAXBContextFactory", "org.eclipse.persistence.jaxb.JAXBContextFactory");
         System.setProperty("javax.xml.bind.context.factory", "org.eclipse.persistence.jaxb.JAXBContextFactory");
-
-        LegacyCliAdapter adapter = new LegacyCliAdapter();
+        System.setProperty(CliType.CLI_TYPE_KEY, CliType.CONFIG_MIGRATION.name());
         try {
-            CliResult result = adapter.execute(args);
-            System.exit(result.getStatus());
+            final CommandLine commandLine = new CommandLine(new LegacyCliAdapter());
+            commandLine
+                    .registerConverter(Config.class, new ConfigConverter())
+                    .setSeparator(" ")
+                    .setCaseInsensitiveEnumValuesAllowed(true);
+
+            commandLine.execute(args);
+            final CliResult cliResult = commandLine.getExecutionResult();
+
+            System.exit(cliResult.getStatus());
         } catch (final Exception ex) {
             System.err.println(ex.toString());
             System.exit(1);

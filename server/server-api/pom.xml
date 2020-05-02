@@ -3,16 +3,22 @@
 
     <modelVersion>4.0.0</modelVersion>
 
+    <name>server-api</name>
     <artifactId>server-api</artifactId>
     <packaging>jar</packaging>
 
     <parent>
         <groupId>com.jpmorgan.quorum</groupId>
         <artifactId>server</artifactId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
 
     <dependencies>
+
+        <dependency>
+            <groupId>com.jpmorgan.quorum</groupId>
+            <artifactId>shared</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>com.jpmorgan.quorum</groupId>
@@ -20,5 +26,5 @@
         </dependency>
         
     </dependencies>
-    <name>server-api</name>
+
 </project>

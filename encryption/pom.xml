@@ -9,7 +9,7 @@
     <parent>
         <artifactId>tessera</artifactId>
         <groupId>com.jpmorgan.quorum</groupId>
-        <version>0.10-SNAPSHOT</version>
+        <version>0.10.6-SNAPSHOT</version>
     </parent>
 
 
@@ -17,6 +17,7 @@
         <module>encryption-api</module>
         <module>encryption-jnacl</module>
         <module>encryption-kalium</module>
+        <module>encryption-ec</module>
     </modules>
 
 </project>
