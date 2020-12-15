@@ -7,11 +7,16 @@ plugins {
 
 }
 
-def jettyVersion = "9.4.25.v20191220"
-def springVersion = "5.2.3.RELEASE"
+ext {
+    jettyVersion = "9.4.35.v20201120"
+    springVersion = "5.2.9.RELEASE"
+    eclipseLinkVersion = "2.7.7"
+    swaggerVersion = "2.1.5"
+}
+
 
 allprojects {
-    group = 'com.jpmorgan.quorum'
+    group = 'net.consensys.quorum.tessera'
     //version = '0.11-SNAPSHOT'
 
 
@@ -25,14 +30,14 @@ allprojects {
                 runtimeOnly "ch.qos.logback:logback-core:1.2.3"
                 runtimeOnly "org.slf4j:jcl-over-slf4j:1.7.5"
                 runtimeOnly "org.slf4j:jul-to-slf4j:1.7.5"
-                runtimeOnly "org.eclipse.persistence:org.eclipse.persistence.moxy:2.7.3"
+                runtimeOnly "org.eclipse.persistence:org.eclipse.persistence.moxy:"+ eclipseLinkVersion
 
-                testCompile "junit:junit:4.12"
+                testCompile "junit:junit:4.13.1"
                 testCompile "org.assertj:assertj-core:3.9.1"
-                testCompile "org.mockito:mockito-core:2.23.0"
+                testCompile "org.mockito:mockito-core:3.4.4"
                 testCompile "com.openpojo:openpojo:0.8.10"
                 testCompile "com.github.stefanbirkner:system-rules:1.18.0"
-                testCompile "nl.jqno.equalsverifier:equalsverifier:3.1.5"
+                testCompile "nl.jqno.equalsverifier:equalsverifier:3.4.1"
                 compile "com.github.jnr:jnr-unixsocket:0.28"
                 compile "de.mkammerer:argon2-jvm:2.5"
                 compile "javax.validation:validation-api:2.0.1.Final"
@@ -62,9 +67,9 @@ allprojects {
                 compile "org.cryptacular:cryptacular:1.2.2"
                 compile "eu.neilalexander:jnacl:1.0.0"
                 compile "javax.ws.rs:javax.ws.rs-api:2.1"
-                compile "org.eclipse.jetty:jetty-unixsocket:9.4.17.v20190418"
+                compile "org.eclipse.jetty:jetty-unixsocket:$jettyVersion"
                 compile "org.glassfish.jersey.core:jersey-client:2.27"
-                compile "org.eclipse.jetty:jetty-client:9.4.17.v20190418"
+                compile "org.eclipse.jetty:jetty-client:$jettyVersion"
                 compile "org.glassfish.jersey.media:jersey-media-moxy:2.27"
                 compile "org.glassfish.jersey.core:jersey-server:2.27"
                 compile "org.glassfish.jersey.ext:jersey-bean-validation:2.27"
@@ -73,14 +78,16 @@ allprojects {
                 compile "javax.servlet:javax.servlet-api:4.0.1"
                 compile "com.sun.mail:javax.mail:1.6.2"
 
-                compile "org.eclipse.jetty:jetty-servlet:"+ jettyVersion
+                compile "org.eclipse.jetty:jetty-servlet:$jettyVersion"
                 compile "org.glassfish.jersey.inject:jersey-hk2:2.27"
                 compile "org.glassfish.jersey.core:jersey-common:2.27"
-                compile "org.eclipse.jetty:jetty-unixsocket:"+ jettyVersion
-                compile "org.eclipse.jetty:jetty-server:"+ jettyVersion
-                compile "org.eclipse.jetty.websocket:javax-websocket-server-impl:"+ jettyVersion
+                compile "org.eclipse.jetty:jetty-unixsocket:$jettyVersion"
+                compile "org.eclipse.jetty:jetty-server:$jettyVersion"
+                compile "org.eclipse.jetty:jetty-jndi:$jettyVersion"
+                compile "org.eclipse.jetty:jetty-plus:$jettyVersion"
 
-                compile "io.swagger:swagger-annotations:1.5.4"
+                compile "io.swagger.core.v3:swagger-annotations:$swaggerVersion"
+
                 compile "javax.transaction:javax.transaction-api:1.3"
                 compile "org.bouncycastle:bcpkix-jdk15on:1.61"
 
@@ -95,8 +102,8 @@ allprojects {
                 compile "org.bouncycastle:bcprov-jdk15on:1.61"
                 compile "com.h2database:h2:1.4.200"
                 compile "com.zaxxer:HikariCP:3.2.0"
-                compile "org.eclipse.persistence:org.eclipse.persistence.jpa:2.7.3"
-                compile "org.eclipse.persistence:org.eclipse.persistence.extension:2.7.3"
+                compile "org.eclipse.persistence:org.eclipse.persistence.jpa:"+ eclipseLinkVersion
+                compile "org.eclipse.persistence:org.eclipse.persistence.extension:"+ eclipseLinkVersion
                 compile "org.hsqldb:hsqldb:2.4.1"
                 compile "org.xerial:sqlite-jdbc:3.23.1"
                 compile "javax.persistence:javax.persistence-api:2.2"
@@ -109,6 +116,9 @@ allprojects {
                 compile "javax.annotation:javax.annotation-api:1.3.2"
 
                 compile "org.glassfish:jsonp-jaxrs:1.1.6"
+
+                implementation 'com.fasterxml.jackson.core:jackson-databind:2.10.4'
+                implementation 'com.squareup.retrofit2:adapter-rxjava:2.5.0'
             }
         }
     }
@@ -164,7 +174,7 @@ subprojects {
 
 
     }
-    
+
     jacoco {
         toolVersion = "0.8.5"
     }
@@ -174,10 +184,7 @@ subprojects {
         lineEndings = 'unix'
 
         java {
-
-            target fileTree('**/*.java') {
-                exclude('enclave/enclave-websockets/**/*.java')
-            }
+            target fileTree('**/*.java')
             // indentWithSpaces(4)
             removeUnusedImports()
             // googleJavaFormat().aosp()
@@ -214,6 +221,10 @@ subprojects {
                 }
 
                 excludes = [
+                        'com.quorum.tessera.launcher.Launcher',
+                        'com.quorum.tessera.launcher.Launcher.*',
+                        'com.quorum.tessera.launcher.Main',
+                        'com.quorum.tessera.multitenancy.migration.Main',
                         'com.quorum.tessera.config.migration.Main',
                         'com.quorum.tessera.data.migration.Main',
                         'com.quorum.tessera.passwords.ConsolePasswordReader',
@@ -275,9 +286,9 @@ subprojects {
                 }
 
                 pom {
-                    groupId = 'com.jpmorgan.quorum'
+                    groupId = 'net.consensys.quorum.tessera'
 //                    description = 'A concise description of my library'
-                    url = 'https://github.com/jpmorganchase/tessera'
+                    url = 'https://github.com/ConsenSys/tessera'
                     licenses {
                         license {
                             name = 'The Apache License, Version 2.0'
@@ -319,9 +330,9 @@ subprojects {
                     }
 
                     scm {
-                        connection = 'scm:git:https://github.com/jpmorganchase/tessera.git'
-                        developerConnection = 'scm:git:https://github.com/jpmorganchase/tessera.git'
-                        url = 'https://github.com/jpmorganchase/tessera'
+                        connection = 'scm:git:https://github.com/ConsenSys/tessera.git'
+                        developerConnection = 'scm:git:https://github.com/ConsenSys/tessera.git'
+                        url = 'https://github.com/ConsenSys/tessera'
                         tag = 'HEAD'
                     }
 
@@ -366,12 +377,8 @@ subprojects {
     }
 
 
-    test {
-        exclude '**/*IT.class'
-    }
-
     jacocoTestCoverageVerification.dependsOn jacocoTestReport
-    check.dependsOn checkstyleMain, checkstyleTest, dependencyCheckAnalyze, spotlessCheck, jacocoTestCoverageVerification
+    check.dependsOn checkstyleMain, checkstyleTest, spotlessCheck, jacocoTestCoverageVerification
 
 }
 

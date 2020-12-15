@@ -1,11 +1,13 @@
 package com.quorum.tessera.thirdparty;
 
-import com.quorum.tessera.partyinfo.PartyInfoService;
-import com.quorum.tessera.partyinfo.model.PartyInfo;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiResponse;
-import io.swagger.annotations.ApiResponses;
+import com.quorum.tessera.discovery.Discovery;
+import com.quorum.tessera.partyinfo.node.NodeInfo;
+import com.quorum.tessera.thirdparty.model.GetPublicKeysResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import javax.json.Json;
 import javax.json.JsonArrayBuilder;
@@ -17,39 +19,31 @@ import javax.ws.rs.core.Response;
 
 import static java.util.Objects.requireNonNull;
 
-@Api
+@Tag(name = "third-party")
 @Path("/partyinfo")
 public class PartyInfoResource {
 
-    private final PartyInfoService partyInfoService;
+    private final Discovery discovery;
 
-    public PartyInfoResource(final PartyInfoService partyInfoService) {
-        this.partyInfoService = requireNonNull(partyInfoService, "partyInfoService must not be null");
+    public PartyInfoResource(final Discovery discovery) {
+        this.discovery = requireNonNull(discovery, "discovery must not be null");
     }
 
+    @Operation(summary = "/partyinfo/keys", operationId = "getPartiesPublicKeys", description = "get public keys of all known nodes in the network, including the server's own keys")
+    @ApiResponse(responseCode = "200", description = "known nodes' public keys", content = @Content(schema = @Schema(implementation = GetPublicKeysResponse.class)))
     @GET
     @Path("/keys")
     @Produces(MediaType.APPLICATION_JSON)
-    @ApiOperation(value = "Fetch network/peer public keys")
-    @ApiResponses({@ApiResponse(code = 200, message = "Peer/Network public keys")})
     public Response getPartyInfoKeys() {
 
-        final PartyInfo current = this.partyInfoService.getPartyInfo();
+        final NodeInfo current = this.discovery.getCurrent();
 
         final JsonArrayBuilder recipientBuilder = Json.createArrayBuilder();
         current.getRecipients().stream()
-                .map(
-                        recipient ->
-                                Json.createObjectBuilder()
-                                        .add("key", recipient.getKey().encodeToBase64())
-                                        .build())
+                .map(recipient -> Json.createObjectBuilder().add("key", recipient.getKey().encodeToBase64()).build())
                 .forEach(recipientBuilder::add);
 
-        final String output =
-                Json.createObjectBuilder()
-                        .add("keys", recipientBuilder.build())
-                        .build()
-                        .toString();
+        final String output = Json.createObjectBuilder().add("keys", recipientBuilder.build()).build().toString();
 
         return Response.status(Response.Status.OK).entity(output).build();
     }

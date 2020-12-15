@@ -2,7 +2,7 @@ plugins {
     id 'java'
 }
 
-group 'com.jpmorgan.quorum'
+group 'net.consensys.quorum.tessera'
 version '0.11-SNAPSHOT'
 
 dependencies {
@@ -14,5 +14,5 @@ dependencies {
 //   testCompile project(':server:server-api')
     compile "javax.ws.rs:javax.ws.rs-api"
     runtimeOnly "org.hibernate:hibernate-validator"
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+    testCompile group: 'junit', name: 'junit', version: '4.13.1'
 }

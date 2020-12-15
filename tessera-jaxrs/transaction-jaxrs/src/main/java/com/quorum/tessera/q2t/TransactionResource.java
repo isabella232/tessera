@@ -1,27 +1,39 @@
 package com.quorum.tessera.q2t;
 
-import com.quorum.tessera.api.model.*;
-import com.quorum.tessera.core.api.ServiceFactory;
+import com.quorum.tessera.api.*;
+import com.quorum.tessera.api.constraint.PrivacyValid;
+import com.quorum.tessera.config.constraints.ValidBase64;
+import com.quorum.tessera.data.MessageHash;
+import com.quorum.tessera.enclave.PrivacyMode;
 import com.quorum.tessera.encryption.PublicKey;
 import com.quorum.tessera.transaction.TransactionManager;
-import io.swagger.annotations.*;
+import io.swagger.v3.oas.annotations.Hidden;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Pattern;
 import javax.validation.constraints.Size;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.UriBuilder;
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static javax.ws.rs.core.MediaType.*;
 
@@ -31,137 +43,350 @@ import static javax.ws.rs.core.MediaType.*;
  * <p>- creating new transactions and distributing them - deleting transactions - fetching transactions - resending old
  * transactions
  */
-@Api
+@Tag(name = "quorum-to-tessera")
 @Path("/")
 public class TransactionResource {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TransactionResource.class);
 
-    private final TransactionManager delegate;
+    private final TransactionManager transactionManager;
 
-    public TransactionResource() {
-        this(ServiceFactory.create().transactionManager());
+    public TransactionResource(TransactionManager transactionManager) {
+        this.transactionManager = Objects.requireNonNull(transactionManager);
     }
 
-    public TransactionResource(TransactionManager delegate) {
-        this.delegate = Objects.requireNonNull(delegate);
-    }
-
-    @ApiOperation(value = "Send private transaction payload")
-    @ApiResponses({
-        @ApiResponse(code = 200, response = SendResponse.class, message = "Send response"),
-        @ApiResponse(code = 400, message = "For unknown and unknown keys")
-    })
+    // hide this operation from swagger generation; the /send operation is overloaded and must be documented in a single
+    // place
+    @Hidden
     @POST
     @Path("send")
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON)
-    public Response send(@ApiParam(name = "sendRequest", required = true) @NotNull @Valid final SendRequest sendRequest)
-            throws UnsupportedEncodingException {
+    public Response send(@NotNull @Valid @PrivacyValid final SendRequest sendRequest) {
 
-        final SendResponse response = delegate.send(sendRequest);
+        Base64.Decoder base64Decoder = Base64.getDecoder();
 
-        URI location =
-                UriBuilder.fromPath("transaction")
-                        .path(URLEncoder.encode(response.getKey(), StandardCharsets.UTF_8.toString()))
+        PublicKey sender =
+                Optional.ofNullable(sendRequest.getFrom())
+                        .map(base64Decoder::decode)
+                        .map(PublicKey::from)
+                        .orElseGet(transactionManager::defaultPublicKey);
+
+        final List<PublicKey> recipientList =
+                Stream.of(sendRequest)
+                        .filter(sr -> Objects.nonNull(sr.getTo()))
+                        .flatMap(s -> Stream.of(s.getTo()))
+                        .map(base64Decoder::decode)
+                        .map(PublicKey::from)
+                        .collect(Collectors.toList());
+
+        final Set<MessageHash> affectedTransactions =
+                Stream.ofNullable(sendRequest.getAffectedContractTransactions())
+                        .flatMap(Arrays::stream)
+                        .map(Base64.getDecoder()::decode)
+                        .map(MessageHash::new)
+                        .collect(Collectors.toSet());
+
+        final byte[] execHash =
+                Optional.ofNullable(sendRequest.getExecHash()).map(String::getBytes).orElse(new byte[0]);
+
+        final PrivacyMode privacyMode = PrivacyMode.fromFlag(sendRequest.getPrivacyFlag());
+
+        final com.quorum.tessera.transaction.SendRequest request =
+                com.quorum.tessera.transaction.SendRequest.Builder.create()
+                        .withRecipients(recipientList)
+                        .withSender(sender)
+                        .withPayload(sendRequest.getPayload())
+                        .withExecHash(execHash)
+                        .withPrivacyMode(privacyMode)
+                        .withAffectedContractTransactions(affectedTransactions)
                         .build();
 
-        return Response.status(Status.CREATED).type(APPLICATION_JSON).location(location).entity(response).build();
+        final com.quorum.tessera.transaction.SendResponse response = transactionManager.send(request);
+
+        final String encodedKey =
+                Optional.of(response)
+                        .map(com.quorum.tessera.transaction.SendResponse::getTransactionHash)
+                        .map(MessageHash::getHashBytes)
+                        .map(Base64.getEncoder()::encodeToString)
+                        .get();
+
+        final SendResponse sendResponse =
+                Optional.of(response)
+                        .map(com.quorum.tessera.transaction.SendResponse::getTransactionHash)
+                        .map(MessageHash::getHashBytes)
+                        .map(Base64.getEncoder()::encodeToString)
+                        .map(messageHash -> new SendResponse(messageHash, null))
+                        .get();
+
+        final URI location =
+                UriBuilder.fromPath("transaction").path(URLEncoder.encode(encodedKey, StandardCharsets.UTF_8)).build();
+
+        return Response.status(Status.CREATED).type(APPLICATION_JSON).location(location).entity(sendResponse).build();
     }
 
-    @ApiOperation(value = "Send private raw transaction payload")
-    @ApiResponses({
-        @ApiResponse(code = 200, response = SendResponse.class, message = "Send response"),
-        @ApiResponse(code = 400, message = "For unknown and unknown keys")
-    })
+    // hide this operation from swagger generation; the /sendsignedtx operation is overloaded and must be documented in
+    // a single place
+    @Hidden
     @POST
     @Path("sendsignedtx")
     @Consumes(APPLICATION_OCTET_STREAM)
     @Produces(TEXT_PLAIN)
-    public Response sendSignedTransaction(
-            @HeaderParam("c11n-to") final String recipientKeys, @NotNull @Size(min = 1) final byte[] signedTransaction)
-            throws UnsupportedEncodingException {
+    public Response sendSignedTransactionStandard(
+            @Parameter(
+                            description =
+                                    "comma-separated list of recipient public keys (for application/octet-stream requests)",
+                            schema = @Schema(format = "base64"))
+                    @HeaderParam("c11n-to")
+                    final String recipientKeys,
+            @Valid @NotNull @Size(min = 1) final byte[] signedTransaction) {
 
-        SendSignedRequest sendSignedRequest = new SendSignedRequest();
+        final List<PublicKey> recipients =
+                Stream.ofNullable(recipientKeys)
+                        .filter(s -> !Objects.equals("", s))
+                        .map(v -> v.split(","))
+                        .flatMap(Arrays::stream)
+                        .map(Base64.getDecoder()::decode)
+                        .map(PublicKey::from)
+                        .collect(Collectors.toList());
 
-        sendSignedRequest.setHash(signedTransaction);
+        final com.quorum.tessera.transaction.SendSignedRequest request =
+                com.quorum.tessera.transaction.SendSignedRequest.Builder.create()
+                        .withRecipients(recipients)
+                        .withSignedData(signedTransaction)
+                        .withPrivacyMode(PrivacyMode.STANDARD_PRIVATE)
+                        .withAffectedContractTransactions(Collections.emptySet())
+                        .withExecHash(new byte[0])
+                        .build();
 
-        Optional.ofNullable(recipientKeys)
-                .filter(s -> !Objects.equals("", s))
-                .map(v -> v.split(","))
-                .ifPresent(sendSignedRequest::setTo);
+        final com.quorum.tessera.transaction.SendResponse response = transactionManager.sendSignedTransaction(request);
 
-        final SendResponse response = delegate.sendSignedTransaction(sendSignedRequest);
+        final String encodedTransactionHash =
+                Base64.getEncoder().encodeToString(response.getTransactionHash().getHashBytes());
 
-        final String encodedKey = response.getKey();
-
-        LOGGER.debug("Encoded key: {}", encodedKey);
+        LOGGER.debug("Encoded key: {}", encodedTransactionHash);
 
         URI location =
                 UriBuilder.fromPath("transaction")
-                        .path(URLEncoder.encode(encodedKey, StandardCharsets.UTF_8.toString()))
+                        .path(URLEncoder.encode(encodedTransactionHash, StandardCharsets.UTF_8))
                         .build();
 
         // TODO: Quorum expects only 200 responses. When Quorum can handle a 201, change to CREATED
-        return Response.status(Status.OK).entity(encodedKey).location(location).build();
+        return Response.status(Status.OK).entity(encodedTransactionHash).location(location).build();
     }
 
-    @ApiOperation(value = "Send private transaction payload")
-    @ApiResponses({
-        @ApiResponse(code = 200, message = "Encoded Key", response = String.class),
-        @ApiResponse(code = 500, message = "Unknown server error")
-    })
+    // hide this operation from swagger generation; the /sendsignedtx operation is overloaded and must be documented in
+    // a single place
+    @Hidden
+    @POST
+    @Path("sendsignedtx")
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON)
+    public Response sendSignedTransactionEnhanced(
+            @NotNull @Valid @PrivacyValid final SendSignedRequest sendSignedRequest) {
+
+        final List<PublicKey> recipients =
+                Optional.ofNullable(sendSignedRequest.getTo())
+                        .map(Arrays::stream)
+                        .orElse(Stream.empty())
+                        .map(Base64.getDecoder()::decode)
+                        .map(PublicKey::from)
+                        .collect(Collectors.toList());
+
+        final PrivacyMode privacyMode = PrivacyMode.fromFlag(sendSignedRequest.getPrivacyFlag());
+
+        final Set<MessageHash> affectedTransactions =
+                Stream.ofNullable(sendSignedRequest.getAffectedContractTransactions())
+                        .flatMap(Arrays::stream)
+                        .map(Base64.getDecoder()::decode)
+                        .map(MessageHash::new)
+                        .collect(Collectors.toSet());
+
+        final byte[] execHash =
+                Optional.ofNullable(sendSignedRequest.getExecHash()).map(String::getBytes).orElse(new byte[0]);
+
+        final com.quorum.tessera.transaction.SendSignedRequest request =
+                com.quorum.tessera.transaction.SendSignedRequest.Builder.create()
+                        .withSignedData(sendSignedRequest.getHash())
+                        .withRecipients(recipients)
+                        .withPrivacyMode(privacyMode)
+                        .withAffectedContractTransactions(affectedTransactions)
+                        .withExecHash(execHash)
+                        .build();
+
+        final com.quorum.tessera.transaction.SendResponse response = transactionManager.sendSignedTransaction(request);
+
+        final String endcodedTransactionHash =
+                Optional.of(response)
+                        .map(com.quorum.tessera.transaction.SendResponse::getTransactionHash)
+                        .map(MessageHash::getHashBytes)
+                        .map(Base64.getEncoder()::encodeToString)
+                        .get();
+
+        LOGGER.debug("Encoded key: {}", endcodedTransactionHash);
+
+        URI location =
+                UriBuilder.fromPath("transaction")
+                        .path(URLEncoder.encode(endcodedTransactionHash, StandardCharsets.UTF_8))
+                        .build();
+
+        SendResponse sendResponse = new SendResponse();
+        sendResponse.setKey(endcodedTransactionHash);
+
+        return Response.status(Status.CREATED).type(APPLICATION_JSON).location(location).entity(sendResponse).build();
+    }
+
+    @Operation(
+            summary = "/sendraw",
+            operationId = "encryptStoreAndSendOctetStream",
+            description = "encrypts a payload, stores result in database, and publishes result to recipients")
+    @ApiResponse(
+            responseCode = "200",
+            description = "encrypted payload hash",
+            content =
+                    @Content(
+                            schema =
+                                    @Schema(
+                                            type = "string",
+                                            format = "base64",
+                                            description = "encrypted payload hash")))
     @POST
     @Path("sendraw")
     @Consumes(APPLICATION_OCTET_STREAM)
     @Produces(TEXT_PLAIN)
     public Response sendRaw(
-            @HeaderParam("c11n-from") final String sender,
-            @HeaderParam("c11n-to") final String recipientKeys,
-            @NotNull @Size(min = 1) final byte[] payload)
-            throws UnsupportedEncodingException {
+            @HeaderParam("c11n-from")
+                    @Parameter(
+                            description =
+                                    "public key identifying the server's key pair that will be used in the encryption; if not set, default used",
+                            schema = @Schema(format = "base64"))
+                    @Valid
+                    @ValidBase64
+                    final String sender,
+            @HeaderParam("c11n-to")
+                    @Parameter(
+                            description = "comma-separated list of recipient public keys",
+                            schema = @Schema(format = "base64"))
+                    final String recipientKeys,
+            @Schema(description = "data to be encrypted") @NotNull @Size(min = 1) @Valid final byte[] payload) {
 
-        SendRequest sendRequest = new SendRequest();
-        sendRequest.setFrom(sender);
-        sendRequest.setPayload(payload);
+        final PublicKey senderKey =
+                Optional.ofNullable(sender)
+                        .filter(Predicate.not(String::isEmpty))
+                        .map(Base64.getDecoder()::decode)
+                        .map(PublicKey::from)
+                        .orElseGet(transactionManager::defaultPublicKey);
 
-        Optional.ofNullable(recipientKeys)
-                .filter(s -> !Objects.equals("", s))
-                .map(v -> v.split(","))
-                .ifPresent(sendRequest::setTo);
+        final List<PublicKey> recipients =
+                Stream.of(recipientKeys)
+                        .filter(Objects::nonNull)
+                        .filter(s -> !Objects.equals("", s))
+                        .map(v -> v.split(","))
+                        .flatMap(Arrays::stream)
+                        .map(Base64.getDecoder()::decode)
+                        .map(PublicKey::from)
+                        .collect(Collectors.toList());
 
-        final SendResponse sendResponse = delegate.send(sendRequest);
+        final com.quorum.tessera.transaction.SendRequest request =
+                com.quorum.tessera.transaction.SendRequest.Builder.create()
+                        .withSender(senderKey)
+                        .withRecipients(recipients)
+                        .withPayload(payload)
+                        .withPrivacyMode(PrivacyMode.STANDARD_PRIVATE)
+                        .withAffectedContractTransactions(Collections.emptySet())
+                        .withExecHash(new byte[0])
+                        .build();
 
-        final String encodedKey = sendResponse.getKey();
+        final com.quorum.tessera.transaction.SendResponse sendResponse = transactionManager.send(request);
 
-        LOGGER.debug("Encoded key: {}", encodedKey);
+        final String encodedTransactionHash =
+                Optional.of(sendResponse)
+                        .map(com.quorum.tessera.transaction.SendResponse::getTransactionHash)
+                        .map(MessageHash::getHashBytes)
+                        .map(Base64.getEncoder()::encodeToString)
+                        .get();
+
+        LOGGER.debug("Encoded key: {}", encodedTransactionHash);
 
         URI location =
                 UriBuilder.fromPath("transaction")
-                        .path(URLEncoder.encode(encodedKey, StandardCharsets.UTF_8.toString()))
+                        .path(URLEncoder.encode(encodedTransactionHash, StandardCharsets.UTF_8))
                         .build();
 
         // TODO: Quorum expects only 200 responses. When Quorum can handle a 201, change to CREATED
-        return Response.status(Status.OK).entity(encodedKey).location(location).build();
+        return Response.status(Status.OK).entity(encodedTransactionHash).location(location).build();
     }
 
-    @ApiOperation(value = "Returns decrypted payload back to Quorum")
-    @ApiResponses({@ApiResponse(code = 200, response = ReceiveResponse.class, message = "Receive Response object")})
+    // hide this operation from swagger generation; the /transaction/{hash} operation is overloaded and must be
+    // documented in a single place
+    @Hidden
     @GET
     @Path("/transaction/{hash}")
     @Produces(APPLICATION_JSON)
     public Response receive(
-            @ApiParam("Encoded hash used to decrypt the payload") @NotNull @Valid @PathParam("hash") final String hash,
-            @ApiParam("Encoded recipient key") @Valid @QueryParam("to") final String toStr) {
+            @Parameter(
+                            description = "hash indicating encrypted payload to retrieve from database",
+                            schema = @Schema(format = "base64"))
+                    @Valid
+                    @ValidBase64
+                    @PathParam("hash")
+                    final String hash,
+            @Parameter(
+                            description =
+                                    "(optional) public key of recipient of the encrypted payload; used in decryption; if not provided, decryption is attempted with all known recipient keys in turn",
+                            schema = @Schema(format = "base64"))
+                    @QueryParam("to")
+                    final String toStr,
+            @Parameter(
+                            description =
+                                    "(optional) indicates whether the payload is raw; determines which database the payload is retrieved from; possible values\n* true - for pre-stored payloads in the \"raw\" database\n* false (default) - for already sent payloads in \"standard\" database")
+                    @Valid
+                    @Pattern(flags = Pattern.Flag.CASE_INSENSITIVE, regexp = "^(true|false)$")
+                    @QueryParam("isRaw")
+                    final String isRaw) {
 
-        ReceiveRequest receiveRequest = new ReceiveRequest();
-        receiveRequest.setKey(hash);
-        receiveRequest.setTo(toStr);
-        ReceiveResponse response = delegate.receive(receiveRequest);
+        Base64.Decoder base64Decoder = Base64.getDecoder();
+        final PublicKey recipient =
+                Optional.ofNullable(toStr)
+                        .filter(Predicate.not(String::isEmpty))
+                        .map(base64Decoder::decode)
+                        .map(PublicKey::from)
+                        .orElse(null);
 
-        return Response.status(Status.OK).type(APPLICATION_JSON).entity(response).build();
+        final MessageHash transactionHash = Optional.of(hash).map(base64Decoder::decode).map(MessageHash::new).get();
+
+        final com.quorum.tessera.transaction.ReceiveRequest request =
+                com.quorum.tessera.transaction.ReceiveRequest.Builder.create()
+                        .withRecipient(recipient)
+                        .withTransactionHash(transactionHash)
+                        .withRaw(Boolean.valueOf(isRaw))
+                        .build();
+
+        com.quorum.tessera.transaction.ReceiveResponse response = transactionManager.receive(request);
+
+        final ReceiveResponse receiveResponse = new ReceiveResponse();
+        receiveResponse.setPayload(response.getUnencryptedTransactionData());
+        receiveResponse.setAffectedContractTransactions(
+                response.getAffectedTransactions().stream()
+                        .map(MessageHash::getHashBytes)
+                        .map(Base64.getEncoder()::encodeToString)
+                        .toArray(String[]::new));
+
+        Optional.ofNullable(response.getExecHash()).map(String::new).ifPresent(receiveResponse::setExecHash);
+
+        receiveResponse.setPrivacyFlag(response.getPrivacyMode().getPrivacyFlag());
+
+        return Response.status(Status.OK).type(APPLICATION_JSON).entity(receiveResponse).build();
     }
 
+    @Operation(
+            summary = "/receive",
+            operationId = "getDecryptedPayloadJson",
+            description = "get payload from database, decrypt, and return")
+    @ApiResponse(
+            responseCode = "200",
+            description = "decrypted payload",
+            content = @Content(schema = @Schema(implementation = ReceiveResponse.class)))
     @GET
     @Path("/receive")
     @Consumes(APPLICATION_JSON)
@@ -170,95 +395,121 @@ public class TransactionResource {
 
         LOGGER.debug("Received receive request");
 
-        ReceiveResponse response = delegate.receive(request);
+        Base64.Decoder decoder = Base64.getDecoder();
 
-        return Response.status(Status.OK).type(APPLICATION_JSON).entity(response).build();
+        MessageHash transactionHash =
+                Optional.of(request).map(ReceiveRequest::getKey).map(decoder::decode).map(MessageHash::new).get();
+
+        PublicKey recipient =
+                Optional.of(request)
+                        .map(ReceiveRequest::getTo)
+                        .filter(Predicate.not(String::isEmpty))
+                        .filter(Objects::nonNull)
+                        .map(decoder::decode)
+                        .map(PublicKey::from)
+                        .orElse(null);
+
+        com.quorum.tessera.transaction.ReceiveRequest receiveRequest =
+                com.quorum.tessera.transaction.ReceiveRequest.Builder.create()
+                        .withTransactionHash(transactionHash)
+                        .withRecipient(recipient)
+                        .withRaw(request.isRaw())
+                        .build();
+
+        com.quorum.tessera.transaction.ReceiveResponse response = transactionManager.receive(receiveRequest);
+
+        ReceiveResponse receiveResponse = new ReceiveResponse();
+        receiveResponse.setPrivacyFlag(response.getPrivacyMode().getPrivacyFlag());
+        receiveResponse.setPayload(response.getUnencryptedTransactionData());
+        Optional.ofNullable(response.getExecHash()).map(String::new).ifPresent(receiveResponse::setExecHash);
+
+        String[] affectedTransactions =
+                response.getAffectedTransactions().stream()
+                        .map(MessageHash::getHashBytes)
+                        .map(Base64.getEncoder()::encodeToString)
+                        .toArray(String[]::new);
+
+        receiveResponse.setAffectedContractTransactions(affectedTransactions);
+
+        return Response.status(Status.OK).type(APPLICATION_JSON).entity(receiveResponse).build();
     }
 
-    @ApiOperation(value = "Submit keys to retrieve payload and decrypt it")
-    @ApiResponses({@ApiResponse(code = 200, message = "Raw payload", response = byte[].class)})
+    @Operation(
+            summary = "/receiveraw",
+            operationId = "getDecryptedPayloadOctetStream",
+            description = "get payload from database, decrypt, and return")
+    @ApiResponse(
+            responseCode = "200",
+            description = "decrypted ciphertext payload",
+            content =
+                    @Content(
+                            array =
+                                    @ArraySchema(
+                                            schema =
+                                                    @Schema(
+                                                            type = "string",
+                                                            format = "byte",
+                                                            description = "decrypted ciphertext payload"))))
     @GET
     @Path("receiveraw")
     @Consumes(APPLICATION_OCTET_STREAM)
     @Produces(APPLICATION_OCTET_STREAM)
     public Response receiveRaw(
-            @ApiParam("Encoded transaction hash") @NotNull @HeaderParam(value = "c11n-key") String hash,
-            @ApiParam("Encoded Recipient Public Key") @HeaderParam(value = "c11n-to") String recipientKey) {
+            @Schema(description = "hash indicating encrypted payload to retrieve from database", format = "base64")
+                    @ValidBase64
+                    @NotNull
+                    @HeaderParam(value = "c11n-key")
+                    String hash,
+            @Schema(
+                            description =
+                                    "(optional) public key of recipient of the encrypted payload; used in decryption; if not provided, decryption is attempted with all known recipient keys in turn",
+                            format = "base64")
+                    @ValidBase64
+                    @HeaderParam(value = "c11n-to")
+                    String recipientKey) {
 
         LOGGER.debug("Received receiveraw request for hash : {}, recipientKey: {}", hash, recipientKey);
 
-        ReceiveRequest receiveRequest = new ReceiveRequest();
-        receiveRequest.setKey(hash);
-        receiveRequest.setTo(recipientKey);
+        MessageHash transactionHash = Optional.of(hash).map(Base64.getDecoder()::decode).map(MessageHash::new).get();
+        PublicKey recipient =
+                Optional.ofNullable(recipientKey).map(Base64.getDecoder()::decode).map(PublicKey::from).orElse(null);
+        com.quorum.tessera.transaction.ReceiveRequest request =
+                com.quorum.tessera.transaction.ReceiveRequest.Builder.create()
+                        .withTransactionHash(transactionHash)
+                        .withRecipient(recipient)
+                        .build();
 
-        ReceiveResponse receiveResponse = delegate.receive(receiveRequest);
+        com.quorum.tessera.transaction.ReceiveResponse receiveResponse = transactionManager.receive(request);
 
-        byte[] payload = receiveResponse.getPayload();
+        byte[] payload = receiveResponse.getUnencryptedTransactionData();
 
         return Response.status(Status.OK).entity(payload).build();
     }
 
     @Deprecated
-    @ApiOperation("Deprecated: Replaced by /transaction/{key} DELETE HTTP method")
-    @ApiResponses({
-        @ApiResponse(code = 200, message = "Status message", response = String.class),
-        @ApiResponse(code = 404, message = "If the entity doesn't exist")
-    })
+    @Operation(summary = "/delete", operationId = "deleteDeprecated", description = "delete payload from database")
+    @ApiResponse(
+            responseCode = "200",
+            description = "delete successful",
+            content =
+                    @Content(schema = @Schema(type = "string"), examples = @ExampleObject(value = "Delete successful")))
     @POST
     @Path("delete")
     @Consumes(APPLICATION_JSON)
     @Produces(TEXT_PLAIN)
-    public Response delete(
-            @ApiParam(name = "deleteRequest", required = true, value = "Key data to be deleted") @Valid
-                    final DeleteRequest deleteRequest) {
+    public Response delete(@Valid final DeleteRequest deleteRequest) {
 
         LOGGER.debug("Received deprecated delete request");
 
-        delegate.delete(deleteRequest);
+        MessageHash messageHash =
+                Optional.of(deleteRequest)
+                        .map(DeleteRequest::getKey)
+                        .map(Base64.getDecoder()::decode)
+                        .map(MessageHash::new)
+                        .get();
+
+        transactionManager.delete(messageHash);
 
         return Response.status(Response.Status.OK).entity("Delete successful").build();
-    }
-
-    @ApiOperation("Delete single transaction from P2PRestApp node")
-    @ApiResponses({
-        @ApiResponse(code = 204, message = "Successful deletion"),
-        @ApiResponse(code = 404, message = "If the entity doesn't exist")
-    })
-    @DELETE
-    @Path("/transaction/{key}")
-    public Response deleteKey(@ApiParam("Encoded hash") @PathParam("key") final String key) {
-
-        LOGGER.debug("Received delete key request");
-
-        DeleteRequest delete = new DeleteRequest();
-        delete.setKey(key);
-        delegate.delete(delete);
-
-        return Response.noContent().build();
-    }
-
-    @GET
-    @Path("/transaction/{key}/isSender")
-    public Response isSender(@ApiParam("Encoded hash") @PathParam("key") final String ptmHash) {
-
-        LOGGER.debug("Received isSender API request for key {}", ptmHash);
-
-        boolean isSender = delegate.isSender(ptmHash);
-
-        return Response.ok(isSender).build();
-    }
-
-    @GET
-    @Path("/transaction/{key}/participants")
-    public Response getParticipants(@ApiParam("Encoded hash") @PathParam("key") final String ptmHash) {
-
-        LOGGER.debug("Received participants list API request for key {}", ptmHash);
-
-        final String participantList =
-                delegate.getParticipants(ptmHash).stream()
-                        .map(PublicKey::encodeToBase64)
-                        .collect(Collectors.joining(","));
-
-        return Response.ok(participantList).build();
     }
 }

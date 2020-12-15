@@ -2,65 +2,75 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>com.jpmorgan.quorum</groupId>
+        <groupId>net.consensys.quorum.tessera</groupId>
         <artifactId>tessera-jaxrs</artifactId>
-        <version>0.10.6-SNAPSHOT</version>
+        <version>20.10.1-SNAPSHOT</version>
     </parent>
     <artifactId>transaction-jaxrs</artifactId>
     <packaging>jar</packaging>
     <dependencies>
         <dependency>
-            <groupId>com.jpmorgan.quorum</groupId>
+            <groupId>net.consensys.quorum.tessera</groupId>
             <artifactId>common-jaxrs</artifactId>
-            <version>0.10.6-SNAPSHOT</version>
+            <version>20.10.1-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>net.consensys.quorum.tessera</groupId>
+            <artifactId>mock-jaxrs</artifactId>
+            <version>20.10.1-SNAPSHOT</version>
+            <scope>test</scope>
+            <type>jar</type>
+        </dependency>
+
+        <dependency>
+            <groupId>org.glassfish.jersey.ext</groupId>
+            <artifactId>jersey-bean-validation</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.glassfish.web</groupId>
+                    <artifactId>javax.el</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.el</groupId>
+                    <artifactId>javax.el-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
     </dependencies>
+    <name>transaction-jaxrs</name>
+
     <build>
         <plugins>
             <plugin>
-                <groupId>com.github.kongchen</groupId>
+                <groupId>io.swagger.core.v3</groupId>
                 <artifactId>swagger-maven-plugin</artifactId>
                 <configuration>
-                    <apiSources>
-                        <apiSource>
-                            
-                            <schemes>
-                                <scheme>http</scheme>
-                                <scheme>https</scheme>
-                            </schemes>
-                            <host>localhost:8080</host>
-                            <basePath>/</basePath>
-                            <springmvc>false</springmvc>
-                            <info>
-                                
-                                <title>Tessera rest</title>
-                                <version>${project.version}</version>
-                            </info>
-
-                            <locations>
-                                <location>com.quorum.tessera.api.common</location>
-                                <location>com.quorum.tessera.q2t</location>
-                            </locations>
-                            <templatePath>${project.parent.basedir}/src/main/swagger/strapdown.html.hbs</templatePath>
-                            <outputPath>${project.build.directory}/generated-resources/swagger/swagger.html</outputPath>
-                            <swaggerDirectory>${project.build.directory}/generated-resources/swagger</swaggerDirectory>
-                            <swaggerFileName>swagger</swaggerFileName>
-                        </apiSource>
-
-                    </apiSources>
-
+                    <outputPath>${project.build.directory}/generated-resources/openapi</outputPath>
+                    <outputFileName>openapi.q2t</outputFileName>
+                    <outputFormat>JSONANDYAML</outputFormat>
+                    <prettyPrint>true</prettyPrint>
+                    <openapiFilePath>${project.basedir}/src/main/resources/openapi-base-q2t.yaml</openapiFilePath>
+                    <resourcePackages>
+                        <resourcePackage>com.quorum.tessera.api.common</resourcePackage>
+                        <resourcePackage>com.quorum.tessera.p2p</resourcePackage>
+                        <resourcePackage>com.quorum.tessera.thirdparty</resourcePackage>
+                        <resourcePackage>com.quorum.tessera.q2t</resourcePackage>
+                    </resourcePackages>
+                    <modelConverterClasses>
+                        <modelConverterClass>com.quorum.tessera.openapi.FullyQualifiedNameResolver</modelConverterClass>
+                    </modelConverterClasses>
+                    <filterClass>com.quorum.tessera.openapi.Q2TOperationsFilter</filterClass>
                 </configuration>
-
                 <executions>
                     <execution>
                         <phase>compile</phase>
                         <goals>
-                            <goal>generate</goal>
+                            <goal>resolve</goal>
                         </goals>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
-    <name>transaction-jaxrs</name>
 </project>

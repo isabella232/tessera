@@ -4,9 +4,11 @@ import org.bouncycastle.util.encoders.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.persistence.EntityManager;
+import javax.persistence.EntityManagerFactory;
 import javax.persistence.EntityNotFoundException;
-import javax.persistence.PersistenceContext;
+import javax.persistence.criteria.CriteriaBuilder;
+import javax.persistence.criteria.CriteriaQuery;
+import java.util.List;
 import java.util.Optional;
 
 /** A JPA implementation of {@link EncryptedTransactionDAO} */
@@ -14,8 +16,11 @@ public class EncryptedRawTransactionDAOImpl implements EncryptedRawTransactionDA
 
     private static final Logger LOGGER = LoggerFactory.getLogger(EncryptedRawTransactionDAOImpl.class);
 
-    @PersistenceContext(unitName = "tessera")
-    private EntityManager entityManager;
+    private final EntityManagerTemplate entityManagerTemplate;
+
+    public EncryptedRawTransactionDAOImpl(EntityManagerFactory entityManagerFactory) {
+        this.entityManagerTemplate = new EntityManagerTemplate(entityManagerFactory);
+    }
 
     @Override
     public EncryptedRawTransaction save(final EncryptedRawTransaction entity) {
@@ -27,22 +32,82 @@ public class EncryptedRawTransactionDAOImpl implements EncryptedRawTransactionDA
                 toHexString(entity.getNonce()),
                 toHexString(entity.getSender()));
 
-        entityManager.persist(entity);
-
-        return entity;
+        return entityManagerTemplate.execute(
+                entityManager -> {
+                    entityManager.persist(entity);
+                    return entity;
+                });
     }
 
     @Override
     public Optional<EncryptedRawTransaction> retrieveByHash(final MessageHash hash) {
-        LOGGER.info("Retrieving payload with hash {}", hash);
-        return Optional.ofNullable(entityManager.find(EncryptedRawTransaction.class, hash));
+        LOGGER.debug("Retrieving payload with hash {}", hash);
+
+        EncryptedRawTransaction encryptedRawTransaction =
+                entityManagerTemplate.execute(entityManager -> entityManager.find(EncryptedRawTransaction.class, hash));
+
+        return Optional.ofNullable(encryptedRawTransaction);
     }
 
     @Override
     public void delete(final MessageHash hash) {
         LOGGER.info("Deleting transaction with hash {}", hash);
+        entityManagerTemplate.execute(
+                entityManager -> {
+                    EncryptedRawTransaction txn = entityManager.find(EncryptedRawTransaction.class, hash);
+                    if (txn == null) {
+                        throw new EntityNotFoundException();
+                    }
 
-        entityManager.remove(retrieveByHash(hash).orElseThrow(EntityNotFoundException::new));
+                    entityManager
+                            .createNamedQuery("EncryptedRawTransaction.DeleteByHash")
+                            .setParameter("hash", hash.getHashBytes())
+                            .executeUpdate();
+
+                    return txn;
+                });
+    }
+
+    @Override
+    public boolean upcheck() {
+        // if query succeeds then DB is up and running (else get exception)
+        try {
+            return entityManagerTemplate.execute(
+                    entityManager -> {
+                        Object result =
+                                entityManager.createNamedQuery("EncryptedRawTransaction.Upcheck").getSingleResult();
+
+                        return true;
+                    });
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override
+    public long transactionCount() {
+        upcheck();
+        return entityManagerTemplate.execute(
+                entityManager -> {
+                    CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
+
+                    CriteriaQuery<Long> countQuery = criteriaBuilder.createQuery(Long.class);
+                    countQuery.select(criteriaBuilder.count(countQuery.from(EncryptedRawTransaction.class)));
+
+                    return entityManager.createQuery(countQuery).getSingleResult();
+                });
+    }
+
+    @Override
+    public List<EncryptedRawTransaction> retrieveTransactions(int offset, int maxResult) {
+        LOGGER.debug("Fetching batch(offset:{}, maxResult:{}) of EncryptedRawTransaction entries", offset, maxResult);
+        return entityManagerTemplate.execute(
+                entityManager ->
+                        entityManager
+                                .createNamedQuery("EncryptedRawTransaction.FindAll", EncryptedRawTransaction.class)
+                                .setFirstResult(offset)
+                                .setMaxResults(maxResult)
+                                .getResultList());
     }
 
     private String toHexString(byte[] val) {

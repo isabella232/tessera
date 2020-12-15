@@ -5,6 +5,8 @@ import com.quorum.tessera.test.CucumberRestIT;
 import suite.TestSuite;
 
 @TestSuite.SuiteClasses({
+    PrivacyIT.class,
+    VersionIT.class,
     MultipleKeyNodeIT.class,
     DeleteIT.class,
     PushIT.class,
@@ -17,6 +19,12 @@ import suite.TestSuite;
     P2PRestAppIT.class,
     TransactionForwardingIT.class,
     CucumberRestIT.class,
-    CucumberRawIT.class
+    CucumberRawIT.class,
+    CustomPayloadEncryptionIT.class,
+    OpenApiIT.class,
+    ///
+    com.quorum.tessera.test.rest.multitenancy.SendIT.class,
+    com.quorum.tessera.test.rest.multitenancy.ReceiveIT.class,
+    com.quorum.tessera.test.rest.multitenancy.PrivacyIT.class
 })
 public abstract class RestSuite {}
