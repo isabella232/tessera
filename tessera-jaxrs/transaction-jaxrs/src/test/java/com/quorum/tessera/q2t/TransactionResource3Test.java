@@ -1,13 +1,23 @@
 package com.quorum.tessera.q2t;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
 import com.quorum.tessera.api.SendRequest;
 import com.quorum.tessera.api.SendResponse;
 import com.quorum.tessera.api.SendSignedRequest;
 import com.quorum.tessera.data.MessageHash;
+import com.quorum.tessera.enclave.PrivacyGroup;
 import com.quorum.tessera.enclave.PrivacyMode;
 import com.quorum.tessera.encryption.PublicKey;
+import com.quorum.tessera.privacygroup.PrivacyGroupManager;
 import com.quorum.tessera.transaction.ReceiveResponse;
 import com.quorum.tessera.transaction.TransactionManager;
+import java.util.*;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.core.Application;
+import javax.ws.rs.core.Response;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;
 import org.glassfish.jersey.test.TestProperties;
@@ -18,541 +28,718 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.core.Application;
-import javax.ws.rs.core.Response;
-import java.util.*;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
-
 public class TransactionResource3Test {
 
-    private JerseyTest jersey;
-
-    private TransactionManager transactionManager;
-
-    @BeforeClass
-    public static void setUpLoggers() {
-        SLF4JBridgeHandler.removeHandlersForRootLogger();
-        SLF4JBridgeHandler.install();
-    }
-
-    @Before
-    public void onSetup() throws Exception {
-        this.transactionManager = mock(TransactionManager.class);
-
-        final TransactionResource3 transactionResource = new TransactionResource3(transactionManager);
-
-        jersey =
-                new JerseyTest() {
-                    @Override
-                    protected Application configure() {
-                        forceSet(TestProperties.CONTAINER_PORT, "0");
-                        enable(TestProperties.LOG_TRAFFIC);
-                        enable(TestProperties.DUMP_ENTITY);
-                        return new ResourceConfig().register(transactionResource);
-                    }
-                };
-
-        jersey.setUp();
-    }
-
-    @After
-    public void onTearDown() throws Exception {
-        verifyNoMoreInteractions(transactionManager);
-        jersey.tearDown();
-    }
+  private JerseyTest jersey;
+
+  private TransactionManager transactionManager;
+
+  private PrivacyGroupManager privacyGroupManager;
+
+  @BeforeClass
+  public static void setUpLoggers() {
+    SLF4JBridgeHandler.removeHandlersForRootLogger();
+    SLF4JBridgeHandler.install();
+  }
+
+  @Before
+  public void onSetup() throws Exception {
+    this.transactionManager = mock(TransactionManager.class);
+    this.privacyGroupManager = mock(PrivacyGroupManager.class);
+
+    final TransactionResource3 transactionResource =
+        new TransactionResource3(transactionManager, privacyGroupManager);
+
+    jersey =
+        new JerseyTest() {
+          @Override
+          protected Application configure() {
+            forceSet(TestProperties.CONTAINER_PORT, "0");
+            enable(TestProperties.LOG_TRAFFIC);
+            enable(TestProperties.DUMP_ENTITY);
+            return new ResourceConfig().register(transactionResource);
+          }
+        };
+
+    jersey.setUp();
+  }
+
+  @After
+  public void onTearDown() throws Exception {
+    verifyNoMoreInteractions(transactionManager, privacyGroupManager);
+    jersey.tearDown();
+  }
+
+  @Test
+  public void receiveWithRecipient() {
+    String key = Base64.getEncoder().encodeToString("KEY".getBytes());
+    String recipientKeyBase64 = Base64.getEncoder().encodeToString("recipient".getBytes());
+    final PublicKey senderPublicKey = PublicKey.from("sender".getBytes());
+
+    final ReceiveResponse receiveResponse =
+        ReceiveResponse.Builder.create()
+            .withPrivacyMode(PrivacyMode.STANDARD_PRIVATE)
+            .withUnencryptedTransactionData("Result".getBytes())
+            .withManagedParties(Set.of(senderPublicKey))
+            .withSender(senderPublicKey)
+            .build();
+    when(transactionManager.receive(any())).thenReturn(receiveResponse);
+
+    final Response result =
+        jersey.target("transaction").path(key).request().header("to", recipientKeyBase64).get();
+
+    assertThat(result.getStatus()).isEqualTo(200);
+
+    com.quorum.tessera.api.ReceiveResponse resultResponse =
+        result.readEntity(com.quorum.tessera.api.ReceiveResponse.class);
+
+    assertThat(resultResponse.getPrivacyFlag())
+        .isEqualTo(PrivacyMode.STANDARD_PRIVATE.getPrivacyFlag());
+    assertThat(resultResponse.getPayload()).isEqualTo("Result".getBytes());
+    assertThat(resultResponse.getManagedParties())
+        .containsExactlyInAnyOrder(senderPublicKey.encodeToBase64());
+    assertThat(resultResponse.getSenderKey()).isEqualTo(senderPublicKey.encodeToBase64());
+
+    verify(transactionManager).receive(any(com.quorum.tessera.transaction.ReceiveRequest.class));
+  }
 
-    @Test
-    public void receiveWithRecipient() {
-        String key = Base64.getEncoder().encodeToString("KEY".getBytes());
-        String recipientKeyBase64 = Base64.getEncoder().encodeToString("recipient".getBytes());
-        final PublicKey senderPublicKey = PublicKey.from("sender".getBytes());
+  @Test
+  public void receivePrivateStateValidation() {
+    final PublicKey senderPublicKey = PublicKey.from("sender".getBytes());
 
-        final ReceiveResponse receiveResponse =
-                ReceiveResponse.Builder.create()
-                        .withPrivacyMode(PrivacyMode.STANDARD_PRIVATE)
-                        .withUnencryptedTransactionData("Result".getBytes())
-                        .withManagedParties(Set.of(senderPublicKey))
-                        .withSender(senderPublicKey)
-                        .build();
-        when(transactionManager.receive(any())).thenReturn(receiveResponse);
+    ReceiveResponse response =
+        ReceiveResponse.Builder.create()
+            .withPrivacyMode(PrivacyMode.PRIVATE_STATE_VALIDATION)
+            .withAffectedTransactions(Set.of())
+            .withUnencryptedTransactionData("Success".getBytes())
+            .withExecHash("execHash".getBytes())
+            .withManagedParties(Set.of(senderPublicKey))
+            .withSender(senderPublicKey)
+            .withPrivacyGroupId(PrivacyGroup.Id.fromBytes("group".getBytes()))
+            .build();
+
+    when(transactionManager.receive(any(com.quorum.tessera.transaction.ReceiveRequest.class)))
+        .thenReturn(response);
+
+    String transactionHash = Base64.getEncoder().encodeToString("transactionHash".getBytes());
+
+    Response result = jersey.target("transaction").path(transactionHash).request().get();
+
+    assertThat(result.getStatus()).isEqualTo(200);
 
-        final Response result = jersey.target("transaction").path(key).request().header("to", recipientKeyBase64).get();
+    com.quorum.tessera.api.ReceiveResponse resultResponse =
+        result.readEntity(com.quorum.tessera.api.ReceiveResponse.class);
 
-        assertThat(result.getStatus()).isEqualTo(200);
+    assertThat(resultResponse.getExecHash()).isEqualTo("execHash");
+    assertThat(resultResponse.getPrivacyFlag())
+        .isEqualTo(PrivacyMode.PRIVATE_STATE_VALIDATION.getPrivacyFlag());
+    assertThat(resultResponse.getAffectedContractTransactions()).isNullOrEmpty();
+    assertThat(resultResponse.getPayload()).isEqualTo("Success".getBytes());
+    assertThat(resultResponse.getManagedParties())
+        .containsExactlyInAnyOrder(senderPublicKey.encodeToBase64());
+    assertThat(resultResponse.getSenderKey()).isEqualTo(senderPublicKey.encodeToBase64());
+    assertThat(resultResponse.getPrivacyGroupId())
+        .isEqualTo(PublicKey.from("group".getBytes()).encodeToBase64());
 
-        com.quorum.tessera.api.ReceiveResponse resultResponse =
-                result.readEntity(com.quorum.tessera.api.ReceiveResponse.class);
+    verify(transactionManager).receive(any(com.quorum.tessera.transaction.ReceiveRequest.class));
+  }
 
-        assertThat(resultResponse.getPrivacyFlag()).isEqualTo(PrivacyMode.STANDARD_PRIVATE.getPrivacyFlag());
-        assertThat(resultResponse.getPayload()).isEqualTo("Result".getBytes());
-        assertThat(resultResponse.getManagedParties()).containsExactlyInAnyOrder(senderPublicKey.encodeToBase64());
-        assertThat(resultResponse.getSenderKey()).isEqualTo(senderPublicKey.encodeToBase64());
+  @Test
+  public void receive() {
+    PublicKey sender = PublicKey.from("sender".getBytes());
 
-        verify(transactionManager).receive(any(com.quorum.tessera.transaction.ReceiveRequest.class));
-    }
+    ReceiveResponse response = mock(ReceiveResponse.class);
+    when(response.getPrivacyMode()).thenReturn(PrivacyMode.STANDARD_PRIVATE);
+    when(response.getUnencryptedTransactionData()).thenReturn("Success".getBytes());
+    when(response.sender()).thenReturn(sender);
+
+    when(transactionManager.receive(any(com.quorum.tessera.transaction.ReceiveRequest.class)))
+        .thenReturn(response);
+
+    String transactionHash = Base64.getEncoder().encodeToString("transactionHash".getBytes());
 
-    @Test
-    public void receivePrivateStateValidation() {
-        final PublicKey senderPublicKey = PublicKey.from("sender".getBytes());
+    Response result = jersey.target("transaction").path(transactionHash).request().get();
+
+    assertThat(result.getStatus()).isEqualTo(200);
 
-        ReceiveResponse response =
-                ReceiveResponse.Builder.create()
-                        .withPrivacyMode(PrivacyMode.PRIVATE_STATE_VALIDATION)
-                        .withAffectedTransactions(Set.of())
-                        .withUnencryptedTransactionData("Success".getBytes())
-                        .withExecHash("execHash".getBytes())
-                        .withManagedParties(Set.of(senderPublicKey))
-                        .withSender(senderPublicKey)
-                        .build();
+    com.quorum.tessera.api.ReceiveResponse resultResponse =
+        result.readEntity(com.quorum.tessera.api.ReceiveResponse.class);
+    assertThat(resultResponse.getExecHash()).isNull();
+    assertThat(resultResponse.getPrivacyFlag())
+        .isEqualTo(PrivacyMode.STANDARD_PRIVATE.getPrivacyFlag());
 
-        when(transactionManager.receive(any(com.quorum.tessera.transaction.ReceiveRequest.class))).thenReturn(response);
+    assertThat(resultResponse.getExecHash()).isNull();
+    assertThat(resultResponse.getAffectedContractTransactions()).isNull();
+    assertThat(resultResponse.getPayload()).isEqualTo("Success".getBytes());
+    assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
 
-        String transactionHash = Base64.getEncoder().encodeToString("transactionHash".getBytes());
+    verify(transactionManager).receive(any(com.quorum.tessera.transaction.ReceiveRequest.class));
+  }
 
-        Response result = jersey.target("transaction").path(transactionHash).request().get();
+  @Test
+  public void send() {
 
-        assertThat(result.getStatus()).isEqualTo(200);
+    final Base64.Encoder base64Encoder = Base64.getEncoder();
 
-        com.quorum.tessera.api.ReceiveResponse resultResponse =
-                result.readEntity(com.quorum.tessera.api.ReceiveResponse.class);
+    final String base64Key = "BULeR8JyUWhiuuCMU/HLA0Q5pzkYT+cHII3ZKBey3Bo=";
 
-        assertThat(resultResponse.getExecHash()).isEqualTo("execHash");
-        assertThat(resultResponse.getPrivacyFlag()).isEqualTo(PrivacyMode.PRIVATE_STATE_VALIDATION.getPrivacyFlag());
-        assertThat(resultResponse.getAffectedContractTransactions()).isNullOrEmpty();
-        assertThat(resultResponse.getPayload()).isEqualTo("Success".getBytes());
-        assertThat(resultResponse.getManagedParties()).containsExactlyInAnyOrder(senderPublicKey.encodeToBase64());
-        assertThat(resultResponse.getSenderKey()).isEqualTo(senderPublicKey.encodeToBase64());
+    final SendRequest sendRequest = new SendRequest();
+    sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
+    sendRequest.setTo(base64Key);
 
-        verify(transactionManager).receive(any(com.quorum.tessera.transaction.ReceiveRequest.class));
-    }
+    final PublicKey sender =
+        PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
+    when(transactionManager.defaultPublicKey()).thenReturn(sender);
 
-    @Test
-    public void receive() {
-        PublicKey sender = PublicKey.from("sender".getBytes());
+    final com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        ReceiveResponse response = mock(ReceiveResponse.class);
-        when(response.getPrivacyMode()).thenReturn(PrivacyMode.STANDARD_PRIVATE);
-        when(response.getUnencryptedTransactionData()).thenReturn("Success".getBytes());
-        when(response.sender()).thenReturn(sender);
+    final MessageHash messageHash = mock(MessageHash.class);
 
-        when(transactionManager.receive(any(com.quorum.tessera.transaction.ReceiveRequest.class))).thenReturn(response);
+    final byte[] txnData = "TxnData".getBytes();
+    when(messageHash.getHashBytes()).thenReturn(txnData);
 
-        String transactionHash = Base64.getEncoder().encodeToString("transactionHash".getBytes());
+    when(sendResponse.getTransactionHash()).thenReturn(messageHash);
+    when(sendResponse.getManagedParties()).thenReturn(Set.of(sender));
 
-        Response result = jersey.target("transaction").path(transactionHash).request().get();
+    when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class)))
+        .thenReturn(sendResponse);
 
-        assertThat(result.getStatus()).isEqualTo(200);
+    final Response result =
+        jersey
+            .target("send")
+            .request()
+            .post(Entity.entity(sendRequest, "application/vnd.tessera-2.1+json"));
 
-        com.quorum.tessera.api.ReceiveResponse resultResponse =
-                result.readEntity(com.quorum.tessera.api.ReceiveResponse.class);
-        assertThat(resultResponse.getExecHash()).isNull();
-        assertThat(resultResponse.getPrivacyFlag()).isEqualTo(PrivacyMode.STANDARD_PRIVATE.getPrivacyFlag());
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        assertThat(resultResponse.getExecHash()).isNull();
-        assertThat(resultResponse.getAffectedContractTransactions()).isNull();
-        assertThat(resultResponse.getPayload()).isEqualTo("Success".getBytes());
-        assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
+    assertThat(result.getLocation().getPath())
+        .isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
+    SendResponse resultSendResponse = result.readEntity(SendResponse.class);
+    assertThat(resultSendResponse.getKey()).isEqualTo(Base64.getEncoder().encodeToString(txnData));
+    assertThat(resultSendResponse.getManagedParties())
+        .containsExactlyInAnyOrder(sender.encodeToBase64());
 
-        verify(transactionManager).receive(any(com.quorum.tessera.transaction.ReceiveRequest.class));
-    }
+    ArgumentCaptor<com.quorum.tessera.transaction.SendRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendRequest.class);
 
-    @Test
-    public void send() {
+    verify(transactionManager).send(argumentCaptor.capture());
+    verify(transactionManager).defaultPublicKey();
 
-        final Base64.Encoder base64Encoder = Base64.getEncoder();
+    com.quorum.tessera.transaction.SendRequest businessObject = argumentCaptor.getValue();
 
-        final String base64Key = "BULeR8JyUWhiuuCMU/HLA0Q5pzkYT+cHII3ZKBey3Bo=";
+    assertThat(businessObject).isNotNull();
+    assertThat(businessObject.getPayload()).isEqualTo(sendRequest.getPayload());
+    assertThat(businessObject.getSender()).isEqualTo(sender);
+    assertThat(businessObject.getRecipients()).hasSize(1);
+    assertThat(businessObject.getRecipients().get(0).encodeToBase64()).isEqualTo(base64Key);
+    assertThat(businessObject.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
+    assertThat(businessObject.getAffectedContractTransactions()).isEmpty();
+    assertThat(businessObject.getExecHash()).isEmpty();
+    assertThat(businessObject.getPrivacyGroupId()).isEmpty();
+  }
 
-        final SendRequest sendRequest = new SendRequest();
-        sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
-        sendRequest.setTo(base64Key);
+  @Test
+  public void sendWithPrivacy() {
+    final Base64.Encoder base64Encoder = Base64.getEncoder();
 
-        final PublicKey sender =
-                PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
-        when(transactionManager.defaultPublicKey()).thenReturn(sender);
+    final String base64Key = "BULeR8JyUWhiuuCMU/HLA0Q5pzkYT+cHII3ZKBey3Bo=";
+    final String base64Hash =
+        "yKNxAAPdBMiEZFkyQifH1PShwHTHTdE92T3hAfSQ3RtGce9IB8jrsrXxGuCe+Vu3Wyv2zgSbUnt+QBN2Rf48qQ==";
 
-        final com.quorum.tessera.transaction.SendResponse sendResponse =
-                mock(com.quorum.tessera.transaction.SendResponse.class);
+    final SendRequest sendRequest = new SendRequest();
+    sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
+    sendRequest.setTo(base64Key);
+    sendRequest.setPrivacyFlag(3);
+    sendRequest.setAffectedContractTransactions(base64Hash);
+    sendRequest.setExecHash("executionHash");
 
-        final MessageHash messageHash = mock(MessageHash.class);
+    final PublicKey sender = mock(PublicKey.class);
+    when(transactionManager.defaultPublicKey()).thenReturn(sender);
 
-        final byte[] txnData = "TxnData".getBytes();
-        when(messageHash.getHashBytes()).thenReturn(txnData);
+    final com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        when(sendResponse.getTransactionHash()).thenReturn(messageHash);
-        when(sendResponse.getManagedParties()).thenReturn(Set.of(sender));
+    final MessageHash messageHash = mock(MessageHash.class);
 
-        when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class))).thenReturn(sendResponse);
+    final byte[] txnData = "TxnData".getBytes();
+    when(messageHash.getHashBytes()).thenReturn(txnData);
 
-        final Response result =
-                jersey.target("send").request().post(Entity.entity(sendRequest, "application/vnd.tessera-2.1+json"));
+    when(sendResponse.getTransactionHash()).thenReturn(messageHash);
 
-        assertThat(result.getStatus()).isEqualTo(201);
+    when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class)))
+        .thenReturn(sendResponse);
 
-        assertThat(result.getLocation().getPath()).isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
-        SendResponse resultSendResponse = result.readEntity(SendResponse.class);
-        assertThat(resultSendResponse.getKey()).isEqualTo(Base64.getEncoder().encodeToString(txnData));
-        assertThat(resultSendResponse.getManagedParties()).containsExactlyInAnyOrder(sender.encodeToBase64());
+    final Response result =
+        jersey
+            .target("send")
+            .request()
+            .post(Entity.entity(sendRequest, "application/vnd.tessera-2.1+json"));
 
-        ArgumentCaptor<com.quorum.tessera.transaction.SendRequest> argumentCaptor =
-                ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendRequest.class);
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        verify(transactionManager).send(argumentCaptor.capture());
-        verify(transactionManager).defaultPublicKey();
+    assertThat(result.getLocation().getPath())
+        .isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
+    SendResponse resultSendResponse = result.readEntity(SendResponse.class);
+    assertThat(resultSendResponse.getKey());
 
-        com.quorum.tessera.transaction.SendRequest businessObject = argumentCaptor.getValue();
+    ArgumentCaptor<com.quorum.tessera.transaction.SendRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendRequest.class);
 
-        assertThat(businessObject).isNotNull();
-        assertThat(businessObject.getPayload()).isEqualTo(sendRequest.getPayload());
-        assertThat(businessObject.getSender()).isEqualTo(sender);
-        assertThat(businessObject.getRecipients()).hasSize(1);
-        assertThat(businessObject.getRecipients().get(0).encodeToBase64()).isEqualTo(base64Key);
-        assertThat(businessObject.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
-        assertThat(businessObject.getAffectedContractTransactions()).isEmpty();
-        assertThat(businessObject.getExecHash()).isEmpty();
-    }
+    verify(transactionManager).send(argumentCaptor.capture());
+    verify(transactionManager).defaultPublicKey();
 
-    @Test
-    public void sendWithPrivacy() {
-        final Base64.Encoder base64Encoder = Base64.getEncoder();
+    com.quorum.tessera.transaction.SendRequest businessObject = argumentCaptor.getValue();
 
-        final String base64Key = "BULeR8JyUWhiuuCMU/HLA0Q5pzkYT+cHII3ZKBey3Bo=";
-        final String base64Hash =
-                "yKNxAAPdBMiEZFkyQifH1PShwHTHTdE92T3hAfSQ3RtGce9IB8jrsrXxGuCe+Vu3Wyv2zgSbUnt+QBN2Rf48qQ==";
+    assertThat(businessObject).isNotNull();
+    assertThat(businessObject.getPayload()).isEqualTo(sendRequest.getPayload());
+    assertThat(businessObject.getSender()).isEqualTo(sender);
+    assertThat(businessObject.getRecipients()).hasSize(1);
+    assertThat(businessObject.getRecipients().get(0).encodeToBase64()).isEqualTo(base64Key);
 
-        final SendRequest sendRequest = new SendRequest();
-        sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
-        sendRequest.setTo(base64Key);
-        sendRequest.setPrivacyFlag(3);
-        sendRequest.setAffectedContractTransactions(base64Hash);
-        sendRequest.setExecHash("executionHash");
+    assertThat(businessObject.getPrivacyMode()).isEqualTo(PrivacyMode.PRIVATE_STATE_VALIDATION);
+    assertThat(businessObject.getAffectedContractTransactions()).hasSize(1);
+    final MessageHash hash = businessObject.getAffectedContractTransactions().iterator().next();
+    assertThat(Base64.getEncoder().encodeToString(hash.getHashBytes())).isEqualTo(base64Hash);
+    assertThat(businessObject.getExecHash()).isEqualTo("executionHash".getBytes());
+  }
 
-        final PublicKey sender = mock(PublicKey.class);
-        when(transactionManager.defaultPublicKey()).thenReturn(sender);
+  @Test
+  public void sendToPrivacyGroup() {
 
-        final com.quorum.tessera.transaction.SendResponse sendResponse =
-                mock(com.quorum.tessera.transaction.SendResponse.class);
+    final Base64.Encoder base64Encoder = Base64.getEncoder();
 
-        final MessageHash messageHash = mock(MessageHash.class);
+    final String base64Key = "BULeR8JyUWhiuuCMU/HLA0Q5pzkYT+cHII3ZKBey3Bo=";
 
-        final byte[] txnData = "TxnData".getBytes();
-        when(messageHash.getHashBytes()).thenReturn(txnData);
+    final SendRequest sendRequest = new SendRequest();
+    sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
+    sendRequest.setPrivacyGroupId(base64Key);
 
-        when(sendResponse.getTransactionHash()).thenReturn(messageHash);
+    final PublicKey sender = mock(PublicKey.class);
+    when(transactionManager.defaultPublicKey()).thenReturn(sender);
 
-        when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class))).thenReturn(sendResponse);
+    final com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        final Response result =
-                jersey.target("send").request().post(Entity.entity(sendRequest, "application/vnd.tessera-2.1+json"));
+    final MessageHash messageHash = mock(MessageHash.class);
 
-        assertThat(result.getStatus()).isEqualTo(201);
+    final byte[] txnData = "TxnData".getBytes();
+    when(messageHash.getHashBytes()).thenReturn(txnData);
 
-        assertThat(result.getLocation().getPath()).isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
-        SendResponse resultSendResponse = result.readEntity(SendResponse.class);
-        assertThat(resultSendResponse.getKey());
+    when(sendResponse.getTransactionHash()).thenReturn(messageHash);
 
-        ArgumentCaptor<com.quorum.tessera.transaction.SendRequest> argumentCaptor =
-                ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendRequest.class);
+    when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class)))
+        .thenReturn(sendResponse);
 
-        verify(transactionManager).send(argumentCaptor.capture());
-        verify(transactionManager).defaultPublicKey();
+    PrivacyGroup retrieved = mock(PrivacyGroup.class);
+    PrivacyGroup.Id groupId = PrivacyGroup.Id.fromBase64String(base64Key);
+    PublicKey member = PublicKey.from("member".getBytes());
+    when(retrieved.getId()).thenReturn(groupId);
+    when(retrieved.getMembers()).thenReturn(List.of(member));
+    when(privacyGroupManager.retrievePrivacyGroup(groupId)).thenReturn(retrieved);
 
-        com.quorum.tessera.transaction.SendRequest businessObject = argumentCaptor.getValue();
+    final Response result =
+        jersey
+            .target("send")
+            .request()
+            .post(Entity.entity(sendRequest, "application/vnd.tessera-3.0+json"));
 
-        assertThat(businessObject).isNotNull();
-        assertThat(businessObject.getPayload()).isEqualTo(sendRequest.getPayload());
-        assertThat(businessObject.getSender()).isEqualTo(sender);
-        assertThat(businessObject.getRecipients()).hasSize(1);
-        assertThat(businessObject.getRecipients().get(0).encodeToBase64()).isEqualTo(base64Key);
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        assertThat(businessObject.getPrivacyMode()).isEqualTo(PrivacyMode.PRIVATE_STATE_VALIDATION);
-        assertThat(businessObject.getAffectedContractTransactions()).hasSize(1);
-        final MessageHash hash = businessObject.getAffectedContractTransactions().iterator().next();
-        assertThat(Base64.getEncoder().encodeToString(hash.getHashBytes())).isEqualTo(base64Hash);
-        assertThat(businessObject.getExecHash()).isEqualTo("executionHash".getBytes());
-    }
+    assertThat(result.getLocation().getPath())
+        .isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
+    SendResponse resultSendResponse = result.readEntity(SendResponse.class);
+    assertThat(resultSendResponse.getKey()).isEqualTo(Base64.getEncoder().encodeToString(txnData));
 
-    @Test
-    public void sendForRecipient() {
+    ArgumentCaptor<com.quorum.tessera.transaction.SendRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendRequest.class);
 
-        final Base64.Encoder base64Encoder = Base64.getEncoder();
+    verify(transactionManager).send(argumentCaptor.capture());
+    verify(transactionManager).defaultPublicKey();
+    verify(privacyGroupManager).retrievePrivacyGroup(groupId);
 
-        final SendRequest sendRequest = new SendRequest();
-        sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
-        sendRequest.setTo(Base64.getEncoder().encodeToString("Mr Benn".getBytes()));
-        final PublicKey sender = mock(PublicKey.class);
-        when(transactionManager.defaultPublicKey()).thenReturn(sender);
+    com.quorum.tessera.transaction.SendRequest businessObject = argumentCaptor.getValue();
 
-        final com.quorum.tessera.transaction.SendResponse sendResponse =
-                mock(com.quorum.tessera.transaction.SendResponse.class);
+    assertThat(businessObject).isNotNull();
+    assertThat(businessObject.getPayload()).isEqualTo(sendRequest.getPayload());
+    assertThat(businessObject.getSender()).isEqualTo(sender);
+    assertThat(businessObject.getRecipients()).hasSize(1);
+    assertThat(businessObject.getRecipients().get(0)).isEqualTo(member);
 
-        final MessageHash messageHash = mock(MessageHash.class);
+    assertThat(businessObject.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
+    assertThat(businessObject.getAffectedContractTransactions()).isEmpty();
+    assertThat(businessObject.getExecHash()).isEmpty();
 
-        final byte[] txnData = "TxnData".getBytes();
-        when(messageHash.getHashBytes()).thenReturn(txnData);
-        when(sendResponse.getTransactionHash()).thenReturn(messageHash);
+    assertThat(businessObject.getPrivacyGroupId()).isPresent().get().isEqualTo(groupId);
+  }
 
-        when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class))).thenReturn(sendResponse);
+  @Test
+  public void sendForRecipient() {
 
-        final Response result =
-                jersey.target("send").request().post(Entity.entity(sendRequest, "application/vnd.tessera-2.1+json"));
+    final Base64.Encoder base64Encoder = Base64.getEncoder();
 
-        assertThat(result.getStatus()).isEqualTo(201);
+    final SendRequest sendRequest = new SendRequest();
+    sendRequest.setPayload(base64Encoder.encode("PAYLOAD".getBytes()));
+    sendRequest.setTo(Base64.getEncoder().encodeToString("Mr Benn".getBytes()));
+    final PublicKey sender = mock(PublicKey.class);
+    when(transactionManager.defaultPublicKey()).thenReturn(sender);
 
-        assertThat(result.getLocation().getPath()).isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
+    final com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        verify(transactionManager).send(any(com.quorum.tessera.transaction.SendRequest.class));
-        verify(transactionManager).defaultPublicKey();
-    }
+    final MessageHash messageHash = mock(MessageHash.class);
 
-    @Test
-    public void sendSignedTransactionEmptyRecipients() {
+    final byte[] txnData = "TxnData".getBytes();
+    when(messageHash.getHashBytes()).thenReturn(txnData);
+    when(sendResponse.getTransactionHash()).thenReturn(messageHash);
 
-        final PublicKey sender = PublicKey.from("sender".getBytes());
-        com.quorum.tessera.transaction.SendResponse sendResponse =
-                mock(com.quorum.tessera.transaction.SendResponse.class);
+    when(transactionManager.send(any(com.quorum.tessera.transaction.SendRequest.class)))
+        .thenReturn(sendResponse);
 
-        byte[] transactionHashData = "I Love Sparrows".getBytes();
-        final String base64EncodedTransactionHAshData = Base64.getEncoder().encodeToString(transactionHashData);
-        MessageHash transactionHash = mock(MessageHash.class);
-        when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
+    final Response result =
+        jersey
+            .target("send")
+            .request()
+            .post(Entity.entity(sendRequest, "application/vnd.tessera-2.1+json"));
 
-        when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
-        when(sendResponse.getSender()).thenReturn(sender);
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        when(transactionManager.sendSignedTransaction(any(com.quorum.tessera.transaction.SendSignedRequest.class)))
-                .thenReturn(sendResponse);
+    assertThat(result.getLocation().getPath())
+        .isEqualTo("/transaction/" + base64Encoder.encodeToString(txnData));
 
-        SendSignedRequest sendSignedRequest = new SendSignedRequest();
-        sendSignedRequest.setHash("SOMEDATA".getBytes());
+    verify(transactionManager).send(any(com.quorum.tessera.transaction.SendRequest.class));
+    verify(transactionManager).defaultPublicKey();
+  }
 
-        Response result =
-                jersey.target("sendsignedtx")
-                        .request()
-                        .header("Content-Type", "application/vnd.tessera-2.1+json")
-                        .header("Accept", "application/vnd.tessera-2.1+json")
-                        .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-2.1+json"));
+  @Test
+  public void sendSignedTransactionEmptyRecipients() {
 
-        assertThat(result.getStatus()).isEqualTo(201);
+    final PublicKey sender = PublicKey.from("sender".getBytes());
+    com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        SendResponse resultResponse = result.readEntity(SendResponse.class);
+    byte[] transactionHashData = "I Love Sparrows".getBytes();
+    final String base64EncodedTransactionHAshData =
+        Base64.getEncoder().encodeToString(transactionHashData);
+    MessageHash transactionHash = mock(MessageHash.class);
+    when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
 
-        assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
-        assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
+    when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
+    when(sendResponse.getSender()).thenReturn(sender);
 
-        assertThat(result.getLocation()).hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
+    when(transactionManager.sendSignedTransaction(
+            any(com.quorum.tessera.transaction.SendSignedRequest.class)))
+        .thenReturn(sendResponse);
 
-        ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
-                ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
+    SendSignedRequest sendSignedRequest = new SendSignedRequest();
+    sendSignedRequest.setHash("SOMEDATA".getBytes());
 
-        verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
+    Response result =
+        jersey
+            .target("sendsignedtx")
+            .request()
+            .header("Content-Type", "application/vnd.tessera-2.1+json")
+            .header("Accept", "application/vnd.tessera-2.1+json")
+            .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-2.1+json"));
 
-        com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        assertThat(obj).isNotNull();
-        assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
-        assertThat(obj.getRecipients()).hasSize(0);
-        assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
-        assertThat(obj.getAffectedContractTransactions()).isEmpty();
-        assertThat(obj.getExecHash()).isEmpty();
-    }
+    SendResponse resultResponse = result.readEntity(SendResponse.class);
 
-    @Test
-    public void sendSignedTransaction() {
-        final PublicKey sender =
-                PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
+    assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
+    assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
 
-        com.quorum.tessera.transaction.SendResponse sendResponse =
-                mock(com.quorum.tessera.transaction.SendResponse.class);
+    assertThat(result.getLocation())
+        .hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
 
-        byte[] transactionHashData = "I Love Sparrows".getBytes();
-        final String base64EncodedTransactionHAshData = Base64.getEncoder().encodeToString(transactionHashData);
-        MessageHash transactionHash = mock(MessageHash.class);
-        when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
+    ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
 
-        when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
-        when(sendResponse.getManagedParties()).thenReturn(Set.of(sender));
-        when(sendResponse.getSender()).thenReturn(sender);
+    verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
 
-        when(transactionManager.sendSignedTransaction(any(com.quorum.tessera.transaction.SendSignedRequest.class)))
-                .thenReturn(sendResponse);
+    com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
 
-        SendSignedRequest sendSignedRequest = new SendSignedRequest();
-        sendSignedRequest.setHash("SOMEDATA".getBytes());
-        sendSignedRequest.setTo("recipient1", "recipient2");
+    assertThat(obj).isNotNull();
+    assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
+    assertThat(obj.getRecipients()).hasSize(0);
+    assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
+    assertThat(obj.getAffectedContractTransactions()).isEmpty();
+    assertThat(obj.getExecHash()).isEmpty();
+  }
 
-        Response result =
-                jersey.target("sendsignedtx")
-                        .request()
-                        .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-2.1+json"));
+  @Test
+  public void sendSignedTransaction() {
+    final PublicKey sender =
+        PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
 
-        assertThat(result.getStatus()).isEqualTo(201);
+    com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        SendResponse resultResponse = result.readEntity(SendResponse.class);
+    byte[] transactionHashData = "I Love Sparrows".getBytes();
+    final String base64EncodedTransactionHAshData =
+        Base64.getEncoder().encodeToString(transactionHashData);
+    MessageHash transactionHash = mock(MessageHash.class);
+    when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
 
-        assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
-        assertThat(resultResponse.getManagedParties()).containsExactlyInAnyOrder(sender.encodeToBase64());
-        assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
+    when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
+    when(sendResponse.getManagedParties()).thenReturn(Set.of(sender));
+    when(sendResponse.getSender()).thenReturn(sender);
 
-        assertThat(result.getLocation()).hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
+    when(transactionManager.sendSignedTransaction(
+            any(com.quorum.tessera.transaction.SendSignedRequest.class)))
+        .thenReturn(sendResponse);
 
-        ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
-                ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
+    SendSignedRequest sendSignedRequest = new SendSignedRequest();
+    sendSignedRequest.setHash("SOMEDATA".getBytes());
+    sendSignedRequest.setTo("recipient1", "recipient2");
 
-        verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
+    Response result =
+        jersey
+            .target("sendsignedtx")
+            .request()
+            .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-2.1+json"));
 
-        com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        assertThat(obj).isNotNull();
-        assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
-        assertThat(obj.getRecipients()).hasSize(2);
-        assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
-        assertThat(obj.getAffectedContractTransactions()).isEmpty();
-        assertThat(obj.getExecHash()).isEmpty();
-    }
+    SendResponse resultResponse = result.readEntity(SendResponse.class);
 
-    @Test
-    public void sendSignedTransactionWithPrivacy() {
-        final PublicKey sender =
-                PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
+    assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
+    assertThat(resultResponse.getManagedParties())
+        .containsExactlyInAnyOrder(sender.encodeToBase64());
+    assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
 
-        com.quorum.tessera.transaction.SendResponse sendResponse =
-                mock(com.quorum.tessera.transaction.SendResponse.class);
+    assertThat(result.getLocation())
+        .hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
 
-        byte[] transactionHashData = "I Love Sparrows".getBytes();
-        final String base64EncodedTransactionHAshData = Base64.getEncoder().encodeToString(transactionHashData);
-        MessageHash transactionHash = mock(MessageHash.class);
-        when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
+    ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
 
-        when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
-        when(sendResponse.getSender()).thenReturn(sender);
+    verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
 
-        when(transactionManager.sendSignedTransaction(any(com.quorum.tessera.transaction.SendSignedRequest.class)))
-                .thenReturn(sendResponse);
+    com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
 
-        final String base64AffectedHash1 = Base64.getEncoder().encodeToString("aHash1".getBytes());
-        final String base64AffectedHash2 = Base64.getEncoder().encodeToString("aHash2".getBytes());
+    assertThat(obj).isNotNull();
+    assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
+    assertThat(obj.getRecipients()).hasSize(2);
+    assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
+    assertThat(obj.getAffectedContractTransactions()).isEmpty();
+    assertThat(obj.getExecHash()).isEmpty();
+  }
 
-        SendSignedRequest sendSignedRequest = new SendSignedRequest();
-        sendSignedRequest.setHash("SOMEDATA".getBytes());
-        sendSignedRequest.setTo("recipient1", "recipient2");
-        sendSignedRequest.setPrivacyFlag(3);
-        sendSignedRequest.setAffectedContractTransactions(base64AffectedHash1, base64AffectedHash2);
-        sendSignedRequest.setExecHash("execHash");
+  @Test
+  public void sendSignedTransactionToPrivacyGroup() {
 
-        Response result =
-                jersey.target("sendsignedtx")
-                        .request()
-                        .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-2.1+json"));
+    final PublicKey sender =
+        PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
+    com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        assertThat(result.getStatus()).isEqualTo(201);
+    byte[] transactionHashData = "I Love Sparrows".getBytes();
+    final String base64EncodedTransactionHAshData =
+        Base64.getEncoder().encodeToString(transactionHashData);
+    MessageHash transactionHash = mock(MessageHash.class);
+    when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
 
-        SendResponse resultResponse = result.readEntity(SendResponse.class);
+    when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
+    when(sendResponse.getManagedParties()).thenReturn(Set.of(sender));
+    when(sendResponse.getSender()).thenReturn(sender);
 
-        assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
-        assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
+    when(transactionManager.sendSignedTransaction(
+            any(com.quorum.tessera.transaction.SendSignedRequest.class)))
+        .thenReturn(sendResponse);
 
-        assertThat(result.getLocation()).hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
+    PrivacyGroup.Id groupId = PrivacyGroup.Id.fromBytes("groupId".getBytes());
 
-        ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
-                ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
+    SendSignedRequest sendSignedRequest = new SendSignedRequest();
+    sendSignedRequest.setHash("SOMEDATA".getBytes());
+    sendSignedRequest.setPrivacyGroupId(groupId.getBase64());
 
-        verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
+    final PrivacyGroup pg = mock(PrivacyGroup.class);
+    when(pg.getMembers())
+        .thenReturn(List.of(PublicKey.from("r1".getBytes()), PublicKey.from("r2".getBytes())));
+    when(pg.getId()).thenReturn(PrivacyGroup.Id.fromBytes("groupId".getBytes()));
 
-        com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
+    when(privacyGroupManager.retrievePrivacyGroup(groupId)).thenReturn(pg);
 
-        assertThat(obj).isNotNull();
-        assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
-        assertThat(obj.getRecipients()).hasSize(2);
-        assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.PRIVATE_STATE_VALIDATION);
-        assertThat(obj.getAffectedContractTransactions().stream().map(MessageHash::toString))
-                .hasSize(2)
-                .containsExactlyInAnyOrder(base64AffectedHash1, base64AffectedHash2);
+    Response result =
+        jersey
+            .target("sendsignedtx")
+            .request()
+            .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-3.0+json"));
 
-        assertThat(obj.getExecHash()).isEqualTo("execHash".getBytes());
-    }
+    assertThat(result.getStatus()).isEqualTo(201);
 
-    @Test
-    public void deleteKey() {
+    SendResponse resultResponse = result.readEntity(SendResponse.class);
 
-        String encodedTxnHash = Base64.getEncoder().encodeToString("KEY".getBytes());
-        List<MessageHash> results = new ArrayList<>();
-        doAnswer((iom) -> results.add(iom.getArgument(0))).when(transactionManager).delete(any(MessageHash.class));
+    assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
 
-        Response response = jersey.target("transaction").path(encodedTxnHash).request().delete();
+    assertThat(result.getLocation())
+        .hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
 
-        assertThat(results).hasSize(1).extracting(MessageHash::getHashBytes).containsExactly("KEY".getBytes());
+    ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
 
-        assertThat(response.getStatus()).isEqualTo(204);
+    verify(privacyGroupManager).retrievePrivacyGroup(groupId);
+    verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
 
-        verify(transactionManager).delete(any(MessageHash.class));
-    }
+    com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
 
-    @Test
-    public void isSenderDelegates() {
-        when(transactionManager.isSender(any(MessageHash.class))).thenReturn(true);
+    assertThat(obj).isNotNull();
+    assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
+    assertThat(obj.getRecipients()).hasSize(2);
+    assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.STANDARD_PRIVATE);
+    assertThat(obj.getAffectedContractTransactions()).isEmpty();
+    assertThat(obj.getExecHash()).isEmpty();
+    assertThat(obj.getPrivacyGroupId()).isPresent().get().isEqualTo(groupId);
+  }
 
-        String senderKey = Base64.getEncoder().encodeToString("DUMMY_HASH".getBytes());
+  @Test
+  public void sendSignedTransactionWithPrivacy() {
+    final PublicKey sender =
+        PublicKey.from(Base64.getDecoder().decode("QfeDAys9MPDs2XHExtc84jKGHxZg/aj52DTh0vtA3Xc="));
 
-        Response response = jersey.target("transaction").path(senderKey).path("isSender").request().get();
+    com.quorum.tessera.transaction.SendResponse sendResponse =
+        mock(com.quorum.tessera.transaction.SendResponse.class);
 
-        assertThat(response.getStatus()).isEqualTo(200);
-        assertThat(response.readEntity(Boolean.class)).isEqualTo(true);
-        verify(transactionManager).isSender(any(MessageHash.class));
-    }
+    byte[] transactionHashData = "I Love Sparrows".getBytes();
+    final String base64EncodedTransactionHAshData =
+        Base64.getEncoder().encodeToString(transactionHashData);
+    MessageHash transactionHash = mock(MessageHash.class);
+    when(transactionHash.getHashBytes()).thenReturn(transactionHashData);
 
-    @Test
-    public void getParticipantsDelegates() {
-        byte[] data = "DUMMY_HASH".getBytes();
+    when(sendResponse.getTransactionHash()).thenReturn(transactionHash);
+    when(sendResponse.getSender()).thenReturn(sender);
 
-        final String dummyPtmHash = Base64.getEncoder().encodeToString(data);
+    when(transactionManager.sendSignedTransaction(
+            any(com.quorum.tessera.transaction.SendSignedRequest.class)))
+        .thenReturn(sendResponse);
 
-        PublicKey recipient = mock(PublicKey.class);
-        when(recipient.encodeToBase64()).thenReturn("BASE64ENCODEKEY");
+    final String base64AffectedHash1 = Base64.getEncoder().encodeToString("aHash1".getBytes());
+    final String base64AffectedHash2 = Base64.getEncoder().encodeToString("aHash2".getBytes());
 
-        when(transactionManager.getParticipants(any(MessageHash.class))).thenReturn(List.of(recipient));
+    SendSignedRequest sendSignedRequest = new SendSignedRequest();
+    sendSignedRequest.setHash("SOMEDATA".getBytes());
+    sendSignedRequest.setTo("recipient1", "recipient2");
+    sendSignedRequest.setPrivacyFlag(3);
+    sendSignedRequest.setAffectedContractTransactions(base64AffectedHash1, base64AffectedHash2);
+    sendSignedRequest.setExecHash("execHash");
 
-        Response response = jersey.target("transaction").path(dummyPtmHash).path("participants").request().get();
-        assertThat(response.getStatus()).isEqualTo(200);
-        assertThat(response.readEntity(String.class)).isEqualTo("BASE64ENCODEKEY");
-        verify(transactionManager).getParticipants(any(MessageHash.class));
-    }
+    Response result =
+        jersey
+            .target("sendsignedtx")
+            .request()
+            .post(Entity.entity(sendSignedRequest, "application/vnd.tessera-2.1+json"));
 
-    @Test
-    public void validationSendPayloadCannotBeNullOrEmpty() {
+    assertThat(result.getStatus()).isEqualTo(201);
 
-        Collection<Entity> nullAndEmpty =
-                List.of(
-                        Entity.entity(null, "application/vnd.tessera-2.1+json"),
-                        Entity.entity(new byte[0], "application/vnd.tessera-2.1+json"));
+    SendResponse resultResponse = result.readEntity(SendResponse.class);
 
-        Map<String, Collection<Entity>> pathToEntityMapping = Map.of("sendsignedtx", nullAndEmpty);
+    assertThat(resultResponse.getKey()).isEqualTo(base64EncodedTransactionHAshData);
+    assertThat(resultResponse.getSenderKey()).isEqualTo(sender.encodeToBase64());
 
-        pathToEntityMapping.entrySet().stream()
-                .forEach(
-                        e -> {
-                            e.getValue()
-                                    .forEach(
-                                            entity -> {
-                                                Response response =
-                                                        jersey.target(e.getKey())
-                                                                .request()
-                                                                .post(
-                                                                        Entity.entity(
-                                                                                null,
-                                                                                "application/vnd.tessera-2.1+json"));
-                                                assertThat(response.getStatus()).isEqualTo(400);
-                                            });
-                        });
-    }
+    assertThat(result.getLocation())
+        .hasPath("/transaction/".concat(base64EncodedTransactionHAshData));
 
-    @Test
-    public void validationReceiveIsRawMustBeBoolean() {
-        Response response = jersey.target("transaction").path("MYHASH").queryParam("isRaw", "bogus").request().get();
-        assertThat(response.getStatus()).isEqualTo(400);
-    }
+    ArgumentCaptor<com.quorum.tessera.transaction.SendSignedRequest> argumentCaptor =
+        ArgumentCaptor.forClass(com.quorum.tessera.transaction.SendSignedRequest.class);
+
+    verify(transactionManager).sendSignedTransaction(argumentCaptor.capture());
+
+    com.quorum.tessera.transaction.SendSignedRequest obj = argumentCaptor.getValue();
+
+    assertThat(obj).isNotNull();
+    assertThat(obj.getSignedData()).isEqualTo("SOMEDATA".getBytes());
+    assertThat(obj.getRecipients()).hasSize(2);
+    assertThat(obj.getPrivacyMode()).isEqualTo(PrivacyMode.PRIVATE_STATE_VALIDATION);
+    assertThat(obj.getAffectedContractTransactions().stream().map(MessageHash::toString))
+        .hasSize(2)
+        .containsExactlyInAnyOrder(base64AffectedHash1, base64AffectedHash2);
+
+    assertThat(obj.getExecHash()).isEqualTo("execHash".getBytes());
+  }
+
+  @Test
+  public void deleteKey() {
+
+    String encodedTxnHash = Base64.getEncoder().encodeToString("KEY".getBytes());
+    List<MessageHash> results = new ArrayList<>();
+    doAnswer((iom) -> results.add(iom.getArgument(0)))
+        .when(transactionManager)
+        .delete(any(MessageHash.class));
+
+    Response response = jersey.target("transaction").path(encodedTxnHash).request().delete();
+
+    assertThat(results)
+        .hasSize(1)
+        .extracting(MessageHash::getHashBytes)
+        .containsExactly("KEY".getBytes());
+
+    assertThat(response.getStatus()).isEqualTo(204);
+
+    verify(transactionManager).delete(any(MessageHash.class));
+  }
+
+  @Test
+  public void isSenderDelegates() {
+    when(transactionManager.isSender(any(MessageHash.class))).thenReturn(true);
+
+    String senderKey = Base64.getEncoder().encodeToString("DUMMY_HASH".getBytes());
+
+    Response response =
+        jersey.target("transaction").path(senderKey).path("isSender").request().get();
+
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(response.readEntity(Boolean.class)).isEqualTo(true);
+    verify(transactionManager).isSender(any(MessageHash.class));
+  }
+
+  @Test
+  public void getParticipantsDelegates() {
+    byte[] data = "DUMMY_HASH".getBytes();
+
+    final String dummyPtmHash = Base64.getEncoder().encodeToString(data);
+
+    PublicKey recipient = mock(PublicKey.class);
+    when(recipient.encodeToBase64()).thenReturn("BASE64ENCODEKEY");
+
+    when(transactionManager.getParticipants(any(MessageHash.class))).thenReturn(List.of(recipient));
+
+    Response response =
+        jersey.target("transaction").path(dummyPtmHash).path("participants").request().get();
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(response.readEntity(String.class)).isEqualTo("BASE64ENCODEKEY");
+    verify(transactionManager).getParticipants(any(MessageHash.class));
+  }
+
+  @Test
+  public void validationSendPayloadCannotBeNullOrEmpty() {
+
+    Collection<Entity> nullAndEmpty =
+        List.of(
+            Entity.entity(null, "application/vnd.tessera-2.1+json"),
+            Entity.entity(new byte[0], "application/vnd.tessera-2.1+json"));
+
+    Map<String, Collection<Entity>> pathToEntityMapping = Map.of("sendsignedtx", nullAndEmpty);
+
+    pathToEntityMapping.entrySet().stream()
+        .forEach(
+            e ->
+                e.getValue()
+                    .forEach(
+                        entity -> {
+                          Response response =
+                              jersey
+                                  .target(e.getKey())
+                                  .request()
+                                  .post(Entity.entity(null, "application/vnd.tessera-2.1+json"));
+                          assertThat(response.getStatus()).isEqualTo(400);
+                        }));
+  }
+
+  @Test
+  public void validationReceiveIsRawMustBeBoolean() {
+    Response response =
+        jersey.target("transaction").path("MYHASH").queryParam("isRaw", "bogus").request().get();
+    assertThat(response.getStatus()).isEqualTo(400);
+  }
 }
