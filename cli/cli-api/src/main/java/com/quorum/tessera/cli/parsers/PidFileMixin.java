@@ -1,48 +1,62 @@
 package com.quorum.tessera.cli.parsers;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import picocli.CommandLine;
-
-import java.io.OutputStream;
-import java.lang.management.ManagementFactory;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.concurrent.Callable;
-
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
 
-public class PidFileMixin implements Callable<Boolean> {
+import com.quorum.tessera.io.FilesDelegate;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import picocli.CommandLine;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(PidFileMixin.class);
+public class PidFileMixin {
 
-    @CommandLine.Option(names = "-pidfile", arity = "1", description = "the path to write the PID to")
-    private Path pidFilePath = null;
+  private static final Logger LOGGER = LoggerFactory.getLogger(PidFileMixin.class);
 
-    @Override
-    public Boolean call() throws Exception {
-        if (pidFilePath == null) {
-            return true;
-        }
+  private final FilesDelegate filesDelegate;
 
-        if (Files.exists(pidFilePath)) {
-            LOGGER.info("File already exists {}", pidFilePath);
-        } else {
-            LOGGER.info("Created pid file {}", pidFilePath);
-        }
+  @CommandLine.Option(
+      names = {"--pidfile", "-pidfile"},
+      description = "Create a file at the specified path containing the process' ID (PID)")
+  private Path pidFilePath = null;
 
-        final String pid = ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
+  public PidFileMixin() {
+    this(FilesDelegate.create());
+  }
 
-        try (OutputStream stream = Files.newOutputStream(pidFilePath, CREATE, TRUNCATE_EXISTING)) {
-            stream.write(pid.getBytes(UTF_8));
-        }
+  // package-private for testing
+  PidFileMixin(FilesDelegate filesDelegate) {
+    this.filesDelegate = filesDelegate;
+  }
 
-        return true;
+  public void createPidFile() {
+    if (pidFilePath == null) {
+      return;
     }
 
-    public void setPidFilePath(final Path pidFilePath) {
-        this.pidFilePath = pidFilePath;
+    if (Files.exists(pidFilePath)) {
+      LOGGER.info("File already exists {}", pidFilePath);
+    } else {
+      LOGGER.info("Created pid file {}", pidFilePath);
     }
+
+    final String pid = ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
+
+    try (OutputStream stream =
+        filesDelegate.newOutputStream(pidFilePath, CREATE, TRUNCATE_EXISTING)) {
+      stream.write(pid.getBytes(UTF_8));
+    } catch (IOException ex) {
+      throw new UncheckedIOException(ex);
+    }
+  }
+
+  public void setPidFilePath(final Path pidFilePath) {
+    this.pidFilePath = pidFilePath;
+  }
 }

@@ -1,40 +1,50 @@
 package com.quorum.tessera.cli;
 
+import java.io.PrintWriter;
 import picocli.CommandLine;
 
-import java.io.PrintWriter;
+// Implementations of these methods are usually used to determine a command's exit codes for
+// different exceptions
+// encountered during parsing and handling of commandline args.  Tessera, however, has a different
+// system for exit code handling.
+// So instead we capture any exception for later inspection and return a dummy exit code.
+public class CLIExceptionCapturer
+    implements CommandLine.IExecutionExceptionHandler, CommandLine.IParameterExceptionHandler {
 
-// This method usually returns an exit code for a given exception whilst parsing and handling commandline args
-// however, we have a different system in place to do this.
-// So here a dummy exit code is returned with access to the exception thrown
-public class CLIExceptionCapturer implements CommandLine.IExecutionExceptionHandler, CommandLine.IParameterExceptionHandler {
+  private Exception thrown;
 
-    private Exception thrown;
-
-    @Override
-    public int handleExecutionException(
-            final Exception ex, final CommandLine cmd, final CommandLine.ParseResult result) {
-        this.thrown = ex;
-        return 0;
+  // handleExecutionException is called whenever an exception is encountered during the execution of
+  // a picocli
+  // Command's business logic.
+  // Captures exception and, if the exception is a CliException (indicating some invalid user
+  // input), prints cmd usage help.
+  @Override
+  public int handleExecutionException(
+      final Exception ex, final CommandLine cmd, final CommandLine.ParseResult result) {
+    if (ex instanceof CliException) {
+      final PrintWriter writer = cmd.getErr();
+      cmd.usage(writer);
     }
 
-    @Override
-    public int handleParseException(final CommandLine.ParameterException ex, final String[] args) {
-        // This is an exception type from the library, handle as normal
-        if (ex.getCause() == null) {
-            final CommandLine cmd = ex.getCommandLine();
-            final PrintWriter writer = cmd.getErr();
+    this.thrown = ex;
+    return 0;
+  }
 
-            writer.println(ex.getMessage());
-            cmd.usage(writer);
-        }
+  // handleParseException is called whenever invalid user input is detected by picocli framework.
+  // Prints cmd usage help and captures exception msg wrapped in CliException for correct exit code
+  // handling in tessera's higher layers
+  @Override
+  public int handleParseException(final CommandLine.ParameterException ex, final String[] args) {
+    final CommandLine cmd = ex.getCommandLine();
+    final PrintWriter writer = cmd.getErr();
+    cmd.usage(writer);
 
-        // this exception was caused by us, throw it later
-        this.thrown = (Exception) ex.getCause();
-        return 0;
-    }
+    this.thrown = new CliException(ex.getMessage());
 
-    public Exception getThrown() {
-        return thrown;
-    }
+    return 0;
+  }
+
+  public Exception getThrown() {
+    return thrown;
+  }
 }

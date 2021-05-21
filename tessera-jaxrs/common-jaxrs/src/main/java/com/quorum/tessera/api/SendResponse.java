@@ -9,32 +9,46 @@ import io.swagger.v3.oas.annotations.media.Schema;
  */
 public class SendResponse {
 
-    @Schema(description = "encrypted payload hash", format = "base64")
-    private String key;
+  @Schema(description = "encrypted payload hash", format = "base64")
+  private String key;
 
-    @Schema(description = "participant public keys managed by the enclave of this Tessera node", format = "base64")
-    private String[] managedParties;
+  @Schema(
+      description = "participant public keys managed by the enclave of this Tessera node",
+      format = "base64")
+  private String[] managedParties;
 
-    public SendResponse(final String key, final String[] managedParties) {
-        this.key = key;
-        this.managedParties = managedParties;
-    }
+  @Schema(description = "public key of the transaction sender", format = "base64")
+  private String senderKey;
 
-    public SendResponse() {}
+  public SendResponse(final String key, final String[] managedParties, final String senderKey) {
+    this.key = key;
+    this.managedParties = managedParties;
+    this.senderKey = senderKey;
+  }
 
-    public String getKey() {
-        return this.key;
-    }
+  public SendResponse() {}
 
-    public void setKey(final String key) {
-        this.key = key;
-    }
+  public String getKey() {
+    return this.key;
+  }
 
-    public String[] getManagedParties() {
-        return managedParties;
-    }
+  public void setKey(final String key) {
+    this.key = key;
+  }
 
-    public void setManagedParties(final String[] managedParties) {
-        this.managedParties = managedParties;
-    }
+  public String[] getManagedParties() {
+    return managedParties;
+  }
+
+  public void setManagedParties(final String[] managedParties) {
+    this.managedParties = managedParties;
+  }
+
+  public String getSenderKey() {
+    return senderKey;
+  }
+
+  public void setSenderKey(String senderKey) {
+    this.senderKey = senderKey;
+  }
 }
