@@ -4,232 +4,262 @@ import com.quorum.tessera.enclave.*;
 import com.quorum.tessera.encryption.Nonce;
 import com.quorum.tessera.encryption.PublicKey;
 import com.quorum.tessera.service.Service;
-
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+import javax.json.Json;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.StreamingOutput;
-import java.util.*;
-import java.util.stream.Collectors;
-import javax.json.Json;
 import javax.ws.rs.core.Response.Status;
+import javax.ws.rs.core.StreamingOutput;
 
 @Path("/")
 public class EnclaveResource {
 
-    private final Enclave enclave;
+  private final Enclave enclave;
 
-    private final PayloadEncoder payloadEncoder = PayloadEncoder.create();
+  private final PayloadEncoder payloadEncoder = PayloadEncoder.create();
 
-    public EnclaveResource(Enclave enclave) {
-        this.enclave = Objects.requireNonNull(enclave);
+  public EnclaveResource(Enclave enclave) {
+    this.enclave = Objects.requireNonNull(enclave);
+  }
+
+  @GET
+  @Path("ping")
+  public Response ping() {
+    Service.Status status = enclave.status();
+    Status httpStatus;
+    if (status == Service.Status.STARTED) {
+      httpStatus = Status.OK;
+    } else {
+      httpStatus = Status.SERVICE_UNAVAILABLE;
     }
+    return Response.status(httpStatus).entity(status.name()).build();
+  }
 
-    @GET
-    @Path("ping")
-    public Response ping() {
-        Service.Status status = enclave.status();
-        Status httpStatus;
-        if (status == Service.Status.STARTED) {
-            httpStatus = Status.OK;
-        } else {
-            httpStatus = Status.SERVICE_UNAVAILABLE;
-        }
-        return Response.status(httpStatus).entity(status.name()).build();
-    }
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  @GET
+  @Path("default")
+  public Response defaultPublicKey() {
+    final StreamingOutput streamingOutput =
+        out -> out.write(enclave.defaultPublicKey().getKeyBytes());
+    return Response.ok(streamingOutput).build();
+  }
 
-    @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    @GET
-    @Path("default")
-    public Response defaultPublicKey() {
-        final StreamingOutput streamingOutput = out -> out.write(enclave.defaultPublicKey().getKeyBytes());
-        return Response.ok(streamingOutput).build();
-    }
+  @GET
+  @Produces("application/json")
+  @Path("forwarding")
+  public Response getForwardingKeys() {
 
-    @GET
-    @Produces("application/json")
-    @Path("forwarding")
-    public Response getForwardingKeys() {
+    List<String> body =
+        enclave.getForwardingKeys().stream()
+            .map(PublicKey::encodeToBase64)
+            .collect(Collectors.toList());
 
-        List<String> body =
-            enclave.getForwardingKeys().stream().map(PublicKey::encodeToBase64).collect(Collectors.toList());
+    return Response.ok(
+            Json.createArrayBuilder(body).build().toString(), MediaType.APPLICATION_JSON_TYPE)
+        .build();
+  }
 
-        return Response.ok(Json.createArrayBuilder(body).build().toString(), MediaType.APPLICATION_JSON_TYPE).build();
-    }
+  @GET
+  @Produces("application/json")
+  @Path("public")
+  public Response getPublicKeys() {
 
-    @GET
-    @Produces("application/json")
-    @Path("public")
-    public Response getPublicKeys() {
+    List<String> body =
+        enclave.getPublicKeys().stream()
+            .map(PublicKey::encodeToBase64)
+            .collect(Collectors.toList());
 
-        List<String> body =
-            enclave.getPublicKeys().stream().map(PublicKey::encodeToBase64).collect(Collectors.toList());
+    return Response.ok(
+            Json.createArrayBuilder(body).build().toString(), MediaType.APPLICATION_JSON_TYPE)
+        .build();
+  }
 
-        return Response.ok(Json.createArrayBuilder(body).build().toString(), MediaType.APPLICATION_JSON_TYPE).build();
-    }
+  @POST
+  @Path("encrypt")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  public Response encryptPayload(EnclavePayload payload) {
 
-    @POST
-    @Path("encrypt")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    public Response encryptPayload(EnclavePayload payload) {
+    final PublicKey senderKey = PublicKey.from(payload.getSenderKey());
 
-        final PublicKey senderKey = PublicKey.from(payload.getSenderKey());
+    final List<PublicKey> recipientPublicKeys =
+        payload.getRecipientPublicKeys().stream().map(PublicKey::from).collect(Collectors.toList());
 
-        final List<PublicKey> recipientPublicKeys =
-            payload.getRecipientPublicKeys().stream().map(PublicKey::from).collect(Collectors.toList());
+    final List<AffectedTransaction> affectedTransactions =
+        convertToAffectedTransactions(payload.getAffectedContractTransactions());
 
-        final List<AffectedTransaction> affectedTransactions =
-            convertToAffectedTransactions(payload.getAffectedContractTransactions());
+    final PrivacyMetadata.Builder privacyMetaDataBuilder =
+        PrivacyMetadata.Builder.create()
+            .withPrivacyMode(payload.getPrivacyMode())
+            .withAffectedTransactions(affectedTransactions)
+            .withExecHash(payload.getExecHash());
 
-        EncodedPayload outcome =
-            enclave.encryptPayload(
-                payload.getData(),
-                senderKey,
-                recipientPublicKeys,
-                payload.getPrivacyMode(),
-                affectedTransactions,
-                payload.getExecHash());
+    Optional.ofNullable(payload.getPrivacyGroupId())
+        .map(PrivacyGroup.Id::fromBytes)
+        .ifPresent(privacyMetaDataBuilder::withPrivacyGroupId);
 
-        byte[] response = payloadEncoder.encode(outcome);
-        final StreamingOutput streamingOutput = out -> out.write(response);
-        return Response.ok(streamingOutput).build();
-    }
+    EncodedPayload outcome =
+        enclave.encryptPayload(
+            payload.getData(), senderKey, recipientPublicKeys, privacyMetaDataBuilder.build());
 
-    @POST
-    @Path("encrypt/raw")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    public Response encryptPayload(EnclaveRawPayload enclaveRawPayload) {
+    byte[] response = payloadEncoder.encode(outcome);
+    final StreamingOutput streamingOutput = out -> out.write(response);
+    return Response.ok(streamingOutput).build();
+  }
 
-        byte[] encryptedPayload = enclaveRawPayload.getEncryptedPayload();
-        byte[] encryptedKey = enclaveRawPayload.getEncryptedKey();
-        Nonce nonce = new Nonce(enclaveRawPayload.getNonce());
-        PublicKey from = PublicKey.from(enclaveRawPayload.getFrom());
+  @POST
+  @Path("encrypt/raw")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  public Response encryptPayload(EnclaveRawPayload enclaveRawPayload) {
 
-        List<PublicKey> recipientPublicKeys =
-            enclaveRawPayload.getRecipientPublicKeys().stream().map(PublicKey::from).collect(Collectors.toList());
+    byte[] encryptedPayload = enclaveRawPayload.getEncryptedPayload();
+    byte[] encryptedKey = enclaveRawPayload.getEncryptedKey();
+    Nonce nonce = new Nonce(enclaveRawPayload.getNonce());
+    PublicKey from = PublicKey.from(enclaveRawPayload.getFrom());
 
-        RawTransaction rawTransaction = new RawTransaction(encryptedPayload, encryptedKey, nonce, from);
+    List<PublicKey> recipientPublicKeys =
+        enclaveRawPayload.getRecipientPublicKeys().stream()
+            .map(PublicKey::from)
+            .collect(Collectors.toList());
 
-        final List<AffectedTransaction> affectedTransactions =
-            convertToAffectedTransactions(enclaveRawPayload.getAffectedContractTransactions());
+    RawTransaction rawTransaction = new RawTransaction(encryptedPayload, encryptedKey, nonce, from);
 
-        EncodedPayload outcome =
-            enclave.encryptPayload(
-                rawTransaction,
-                recipientPublicKeys,
-                enclaveRawPayload.getPrivacyMode(),
-                affectedTransactions,
-                enclaveRawPayload.getExecHash());
+    final List<AffectedTransaction> affectedTransactions =
+        convertToAffectedTransactions(enclaveRawPayload.getAffectedContractTransactions());
 
-        byte[] response = payloadEncoder.encode(outcome);
-        final StreamingOutput streamingOutput = out -> out.write(response);
-        return Response.ok(streamingOutput).build();
-    }
+    final PrivacyMetadata.Builder privacyMetaDataBuilder =
+        PrivacyMetadata.Builder.create()
+            .withPrivacyMode(enclaveRawPayload.getPrivacyMode())
+            .withAffectedTransactions(affectedTransactions)
+            .withExecHash(enclaveRawPayload.getExecHash());
 
-    @POST
-    @Path("encrypt/toraw")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response encryptRawPayload(EnclavePayload payload) {
+    Optional.ofNullable(enclaveRawPayload.getPrivacyGroupId())
+        .map(PrivacyGroup.Id::fromBytes)
+        .ifPresent(privacyMetaDataBuilder::withPrivacyGroupId);
 
-        RawTransaction rawTransaction =
-            enclave.encryptRawPayload(payload.getData(), PublicKey.from(payload.getSenderKey()));
+    EncodedPayload outcome =
+        enclave.encryptPayload(rawTransaction, recipientPublicKeys, privacyMetaDataBuilder.build());
 
-        EnclaveRawPayload enclaveRawPayload = new EnclaveRawPayload();
-        enclaveRawPayload.setFrom(rawTransaction.getFrom().getKeyBytes());
-        enclaveRawPayload.setNonce(rawTransaction.getNonce().getNonceBytes());
-        enclaveRawPayload.setEncryptedPayload(rawTransaction.getEncryptedPayload());
-        enclaveRawPayload.setEncryptedKey(rawTransaction.getEncryptedKey());
+    byte[] response = payloadEncoder.encode(outcome);
+    final StreamingOutput streamingOutput = out -> out.write(response);
+    return Response.ok(streamingOutput).build();
+  }
 
-        return Response.ok(enclaveRawPayload).build();
-    }
+  @POST
+  @Path("encrypt/toraw")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response encryptRawPayload(EnclavePayload payload) {
 
-    @POST
-    @Path("findinvalidsecurityhashes")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response findInvalidSecurityHashes(EnclaveFindInvalidSecurityHashesRequestPayload payload) {
+    RawTransaction rawTransaction =
+        enclave.encryptRawPayload(payload.getData(), PublicKey.from(payload.getSenderKey()));
 
-        EncodedPayload encodedPayload = payloadEncoder.decode(payload.getEncodedPayload());
+    EnclaveRawPayload enclaveRawPayload = new EnclaveRawPayload();
+    enclaveRawPayload.setFrom(rawTransaction.getFrom().getKeyBytes());
+    enclaveRawPayload.setNonce(rawTransaction.getNonce().getNonceBytes());
+    enclaveRawPayload.setEncryptedPayload(rawTransaction.getEncryptedPayload());
+    enclaveRawPayload.setEncryptedKey(rawTransaction.getEncryptedKey());
 
-        List<AffectedTransaction> affectedTransactions =
-            payload.getAffectedContractTransactions().stream()
-                .map(
-                    keyValuePair ->
-                        AffectedTransaction.Builder.create()
-                            .withHash(keyValuePair.getKey())
-                            .withPayload(PayloadEncoder.create().decode(keyValuePair.getValue()))
-                            .build())
-                .collect(Collectors.toList());
+    return Response.ok(enclaveRawPayload).build();
+  }
 
-        Set<TxHash> invalidSecurityHashes = enclave.findInvalidSecurityHashes(encodedPayload, affectedTransactions);
+  @POST
+  @Path("findinvalidsecurityhashes")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  public Response findInvalidSecurityHashes(
+      EnclaveFindInvalidSecurityHashesRequestPayload payload) {
 
-        EnclaveFindInvalidSecurityHashesResponsePayload responsePayload =
-            new EnclaveFindInvalidSecurityHashesResponsePayload();
-        responsePayload.setInvalidSecurityHashes(
-            invalidSecurityHashes.stream().map(TxHash::getBytes).collect(Collectors.toList()));
+    EncodedPayload encodedPayload = payloadEncoder.decode(payload.getEncodedPayload());
 
-        return Response.ok(responsePayload).build();
-    }
+    List<AffectedTransaction> affectedTransactions =
+        payload.getAffectedContractTransactions().stream()
+            .map(
+                keyValuePair ->
+                    AffectedTransaction.Builder.create()
+                        .withHash(keyValuePair.getKey())
+                        .withPayload(PayloadEncoder.create().decode(keyValuePair.getValue()))
+                        .build())
+            .collect(Collectors.toList());
 
-    @POST
-    @Path("unencrypt/raw")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    public Response unencryptRawPayload(EnclaveRawPayload enclaveRawPayload) {
+    Set<TxHash> invalidSecurityHashes =
+        enclave.findInvalidSecurityHashes(encodedPayload, affectedTransactions);
 
-        RawTransaction rawTransaction =
-            new RawTransaction(
-                enclaveRawPayload.getEncryptedPayload(),
-                enclaveRawPayload.getEncryptedKey(),
-                new Nonce(enclaveRawPayload.getNonce()),
-                PublicKey.from(enclaveRawPayload.getFrom()));
+    EnclaveFindInvalidSecurityHashesResponsePayload responsePayload =
+        new EnclaveFindInvalidSecurityHashesResponsePayload();
+    responsePayload.setInvalidSecurityHashes(
+        invalidSecurityHashes.stream().map(TxHash::getBytes).collect(Collectors.toList()));
 
-        byte[] response = enclave.unencryptRawPayload(rawTransaction);
+    return Response.ok(responsePayload).build();
+  }
 
-        final StreamingOutput streamingOutput = out -> out.write(response);
-        return Response.ok(streamingOutput).build();
-    }
+  @POST
+  @Path("unencrypt/raw")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  public Response unencryptRawPayload(EnclaveRawPayload enclaveRawPayload) {
 
-    @POST
-    @Path("unencrypt")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    public Response unencryptTransaction(EnclaveUnencryptPayload enclaveUnencryptPayload) {
+    RawTransaction rawTransaction =
+        new RawTransaction(
+            enclaveRawPayload.getEncryptedPayload(),
+            enclaveRawPayload.getEncryptedKey(),
+            new Nonce(enclaveRawPayload.getNonce()),
+            PublicKey.from(enclaveRawPayload.getFrom()));
 
-        EncodedPayload payload = payloadEncoder.decode(enclaveUnencryptPayload.getData());
-        PublicKey providedKey =
-            Optional.ofNullable(enclaveUnencryptPayload.getProvidedKey()).map(PublicKey::from).orElse(null);
+    byte[] response = enclave.unencryptRawPayload(rawTransaction);
 
-        byte[] response = enclave.unencryptTransaction(payload, providedKey);
+    final StreamingOutput streamingOutput = out -> out.write(response);
+    return Response.ok(streamingOutput).build();
+  }
 
-        final StreamingOutput streamingOutput = out -> out.write(response);
-        return Response.ok(streamingOutput).build();
-    }
+  @POST
+  @Path("unencrypt")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  public Response unencryptTransaction(EnclaveUnencryptPayload enclaveUnencryptPayload) {
 
-    @POST
-    @Path("addRecipient")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    public Response createNewRecipientBox(EnclaveUnencryptPayload enclaveUnencryptPayload) {
+    EncodedPayload payload = payloadEncoder.decode(enclaveUnencryptPayload.getData());
+    PublicKey providedKey =
+        Optional.ofNullable(enclaveUnencryptPayload.getProvidedKey())
+            .map(PublicKey::from)
+            .orElse(null);
 
-        EncodedPayload payload = payloadEncoder.decode(enclaveUnencryptPayload.getData());
-        PublicKey providedKey = PublicKey.from(enclaveUnencryptPayload.getProvidedKey());
+    byte[] response = enclave.unencryptTransaction(payload, providedKey);
 
-        byte[] response = enclave.createNewRecipientBox(payload, providedKey);
+    final StreamingOutput streamingOutput = out -> out.write(response);
+    return Response.ok(streamingOutput).build();
+  }
 
-        final StreamingOutput streamingOutput = out -> out.write(response);
-        return Response.ok(streamingOutput).build();
-    }
+  @POST
+  @Path("addRecipient")
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  public Response createNewRecipientBox(EnclaveUnencryptPayload enclaveUnencryptPayload) {
 
-    private List<AffectedTransaction> convertToAffectedTransactions(final List<KeyValuePair> keyValuePairs) {
-        return keyValuePairs.stream().map(
-            kvp -> AffectedTransaction.Builder.create()
-                .withHash(kvp.getKey())
-                .withPayload(payloadEncoder.decode(kvp.getValue()))
-                .build()
-        ).collect(Collectors.toUnmodifiableList());
-    }
+    EncodedPayload payload = payloadEncoder.decode(enclaveUnencryptPayload.getData());
+    PublicKey providedKey = PublicKey.from(enclaveUnencryptPayload.getProvidedKey());
+
+    byte[] response = enclave.createNewRecipientBox(payload, providedKey);
+
+    final StreamingOutput streamingOutput = out -> out.write(response);
+    return Response.ok(streamingOutput).build();
+  }
+
+  private List<AffectedTransaction> convertToAffectedTransactions(
+      final List<KeyValuePair> keyValuePairs) {
+    return keyValuePairs.stream()
+        .map(
+            kvp ->
+                AffectedTransaction.Builder.create()
+                    .withHash(kvp.getKey())
+                    .withPayload(payloadEncoder.decode(kvp.getValue()))
+                    .build())
+        .collect(Collectors.toUnmodifiableList());
+  }
 }

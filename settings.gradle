@@ -39,6 +39,7 @@ include(':enclave:enclave-server')
 include(':enclave')
 include(':tessera-dist:tessera-launcher')
 include(':tessera-dist:tessera-app')
+include(':tessera-dist:tessera-simple')
 include(':tessera-dist')
 include(':tessera-partyinfo')
 include(':test-utils:mock-service-locator')
@@ -56,6 +57,7 @@ include(':tessera-data')
 include(':tessera-context')
 include(':tessera-recover')
 include(':migration:multitenancy')
+include(':migration:orion-to-tessera')
 project(':cli:cli-api').projectDir = file('cli/cli-api')
 project(':cli:config-cli').projectDir = file('cli/config-cli')
 project(':tests:acceptance-test').projectDir = file('tests/acceptance-test')
@@ -80,6 +82,8 @@ project(':enclave:enclave-jaxrs').projectDir = file('enclave/enclave-jaxrs')
 project(':enclave:enclave-server').projectDir = file('enclave/enclave-server')
 project(':tessera-dist:tessera-launcher').projectDir = file('tessera-dist/tessera-launcher')
 project(':tessera-dist:tessera-app').projectDir = file('tessera-dist/tessera-app')
+project(':tessera-dist:tessera-simple').projectDir = file('tessera-dist/tessera-simple')
+
 project(':tessera-dist').projectDir = file('tessera-dist')
 project(':test-utils:mock-service-locator').projectDir = file('test-utils/mock-service-locator')
 project(':test-utils:mock-jaxrs').projectDir = file('test-utils/mock-jaxrs')
@@ -90,6 +94,8 @@ project(':tessera-jaxrs:sync-jaxrs').projectDir = file('tessera-jaxrs/sync-jaxrs
 project(':tessera-jaxrs:jaxrs-client').projectDir = file('tessera-jaxrs/jaxrs-client')
 project(':tessera-jaxrs:partyinfo-model').projectDir = file('tessera-jaxrs/partyinfo-model')
 project(':migration:multitenancy').projectDir = file('migration/multitenancy')
+project(':migration:orion-to-tessera').projectDir = file('migration/orion-to-tessera')
+
 include 'service-loader-ext'
 include 'eclipselink-utils'
 

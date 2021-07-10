@@ -1,7 +1,6 @@
 package com.quorum.tessera.enclave.rest;
 
 import com.quorum.tessera.enclave.PrivacyMode;
-
 import java.io.Serializable;
 import java.util.List;
 import javax.xml.bind.annotation.XmlMimeType;
@@ -10,67 +9,78 @@ import javax.xml.bind.annotation.XmlRootElement;
 @XmlRootElement
 public class EnclavePayload implements Serializable {
 
-    @XmlMimeType("base64Binary")
-    private byte[] data;
+  @XmlMimeType("base64Binary")
+  private byte[] data;
 
-    @XmlMimeType("base64Binary")
-    private byte[] senderKey;
+  @XmlMimeType("base64Binary")
+  private byte[] senderKey;
 
-    @XmlMimeType("base64Binary")
-    private List<byte[]> recipientPublicKeys;
+  @XmlMimeType("base64Binary")
+  private List<byte[]> recipientPublicKeys;
 
-    private PrivacyMode privacyMode;
+  private PrivacyMode privacyMode;
 
-    private List<KeyValuePair> affectedContractTransactions;
+  private List<KeyValuePair> affectedContractTransactions;
 
-    @XmlMimeType("base64Binary")
-    private byte[] execHash;
+  @XmlMimeType("base64Binary")
+  private byte[] execHash;
 
-    public byte[] getData() {
-        return data;
-    }
+  @XmlMimeType("base64Binary")
+  private byte[] privacyGroupId;
 
-    public void setData(byte[] data) {
-        this.data = data;
-    }
+  public byte[] getData() {
+    return data;
+  }
 
-    public byte[] getSenderKey() {
-        return senderKey;
-    }
+  public void setData(byte[] data) {
+    this.data = data;
+  }
 
-    public void setSenderKey(byte[] senderKey) {
-        this.senderKey = senderKey;
-    }
+  public byte[] getSenderKey() {
+    return senderKey;
+  }
 
-    public List<byte[]> getRecipientPublicKeys() {
-        return recipientPublicKeys;
-    }
+  public void setSenderKey(byte[] senderKey) {
+    this.senderKey = senderKey;
+  }
 
-    public void setRecipientPublicKeys(List<byte[]> recipientPublicKeys) {
-        this.recipientPublicKeys = recipientPublicKeys;
-    }
+  public List<byte[]> getRecipientPublicKeys() {
+    return recipientPublicKeys;
+  }
 
-    public PrivacyMode getPrivacyMode() {
-        return privacyMode;
-    }
+  public void setRecipientPublicKeys(List<byte[]> recipientPublicKeys) {
+    this.recipientPublicKeys = recipientPublicKeys;
+  }
 
-    public void setPrivacyMode(PrivacyMode privacyMode) {
-        this.privacyMode = privacyMode;
-    }
+  public PrivacyMode getPrivacyMode() {
+    return privacyMode;
+  }
 
-    public List<KeyValuePair> getAffectedContractTransactions() {
-        return affectedContractTransactions;
-    }
+  public void setPrivacyMode(PrivacyMode privacyMode) {
+    this.privacyMode = privacyMode;
+  }
 
-    public void setAffectedContractTransactions(List<KeyValuePair> affectedContractTransactions) {
-        this.affectedContractTransactions = affectedContractTransactions;
-    }
+  public List<KeyValuePair> getAffectedContractTransactions() {
+    return affectedContractTransactions;
+  }
 
-    public byte[] getExecHash() {
-        return execHash;
-    }
+  public void setAffectedContractTransactions(List<KeyValuePair> affectedContractTransactions) {
+    this.affectedContractTransactions = affectedContractTransactions;
+  }
 
-    public void setExecHash(byte[] execHash) {
-        this.execHash = execHash;
-    }
+  public byte[] getExecHash() {
+    return execHash;
+  }
+
+  public void setExecHash(byte[] execHash) {
+    this.execHash = execHash;
+  }
+
+  public byte[] getPrivacyGroupId() {
+    return privacyGroupId;
+  }
+
+  public void setPrivacyGroupId(byte[] privacyGroupId) {
+    this.privacyGroupId = privacyGroupId;
+  }
 }
